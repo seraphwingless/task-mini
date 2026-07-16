@@ -1,5 +1,9 @@
-"""Хранилище задач в Google Sheets — та же таблица и колонки, что у бота.
-Читает/пишет лист 'Tasks'. gspread синхронный, оборачиваем в to_thread."""
+"""Хранилище в Google Sheets.
+Листы:
+  Tasks      — задачи (те же колонки, что у бота, чтобы не конфликтовать).
+  Categories — категории пользователя (name, emoji, color).
+  Comments   — комментарии к задачам (id, task_id, text, created_at).
+gspread синхронный, оборачиваем в to_thread."""
 from __future__ import annotations
 
 import asyncio
@@ -13,11 +17,20 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-HEADER = [
+TASK_HEADER = [
     "id", "title", "notes", "category", "priority",
     "due_at", "remind_at", "recurrence", "status",
     "created_at", "completed_at", "attachments",
     "reminded", "last_nagged_at",
+]
+CAT_HEADER = ["name", "emoji", "color"]
+COMMENT_HEADER = ["id", "task_id", "text", "created_at"]
+
+DEFAULT_CATS = [
+    {"name": "личное", "emoji": "🙋‍♂️", "color": "#639922"},
+    {"name": "бизнес", "emoji": "💼", "color": "#378ADD"},
+    {"name": "спорт", "emoji": "⚽", "color": "#1D9E75"},
+    {"name": "семья", "emoji": "👨‍👩‍👧", "color": "#7F77DD"},
 ]
 
 
@@ -32,70 +45,143 @@ def _creds() -> Credentials:
 class Sheets:
     def __init__(self, sheet_id: str):
         self._sheet_id = sheet_id
-        self._ws: Optional[gspread.Worksheet] = None
+        self._sh = None
+        self._cache: dict[str, gspread.Worksheet] = {}
 
-    def _connect(self) -> gspread.Worksheet:
-        if self._ws is not None:
-            return self._ws
-        client = gspread.authorize(_creds())
-        sh = client.open_by_key(self._sheet_id)
+    def _book(self):
+        if self._sh is None:
+            self._sh = gspread.authorize(_creds()).open_by_key(self._sheet_id)
+        return self._sh
+
+    def _ws(self, name: str, header: list[str]) -> gspread.Worksheet:
+        if name in self._cache:
+            return self._cache[name]
+        sh = self._book()
         try:
-            ws = sh.worksheet("Tasks")
+            ws = sh.worksheet(name)
         except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(title="Tasks", rows=1000, cols=len(HEADER))
-        if ws.row_values(1) != HEADER:
-            ws.update([HEADER], "A1")
-        self._ws = ws
+            ws = sh.add_worksheet(title=name, rows=1000, cols=max(len(header), 4))
+        if ws.row_values(1) != header:
+            ws.update([header], "A1")
+        self._cache[name] = ws
         return ws
 
-    def _list(self) -> list[dict]:
-        ws = self._connect()
-        rows = ws.get_all_records(expected_headers=HEADER)
-        return [{k: str(r.get(k, "")) for k in HEADER} for r in rows]
+    # ---------- tasks ----------
+    def _tasks(self):
+        return self._ws("Tasks", TASK_HEADER)
 
-    def _row_index(self, task_id: str) -> Optional[int]:
-        ws = self._connect()
-        for i, val in enumerate(ws.col_values(1), start=1):
-            if val == task_id:
+    def _list_tasks(self) -> list[dict]:
+        ws = self._tasks()
+        rows = ws.get_all_records(expected_headers=TASK_HEADER)
+        return [{k: str(r.get(k, "")) for k in TASK_HEADER} for r in rows]
+
+    def _task_row(self, task_id: str) -> Optional[int]:
+        for i, v in enumerate(self._tasks().col_values(1), start=1):
+            if v == task_id:
                 return i
         return None
 
-    def _add(self, task: dict) -> dict:
-        ws = self._connect()
+    def _add_task(self, task: dict) -> dict:
+        ws = self._tasks()
         task.setdefault("id", uuid.uuid4().hex[:8])
         task.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
         task.setdefault("status", "open")
-        row = [task.get(k, "") for k in HEADER]
-        ws.append_row(row, value_input_option="RAW")
-        return {k: str(task.get(k, "")) for k in HEADER}
+        ws.append_row([task.get(k, "") for k in TASK_HEADER], value_input_option="RAW")
+        return {k: str(task.get(k, "")) for k in TASK_HEADER}
 
-    def _update(self, task_id: str, patch: dict) -> Optional[dict]:
-        ws = self._connect()
-        idx = self._row_index(task_id)
+    def _update_task(self, task_id: str, patch: dict) -> Optional[dict]:
+        ws = self._tasks()
+        idx = self._task_row(task_id)
         if idx is None:
             return None
-        current = ws.row_values(idx)
-        current += [""] * (len(HEADER) - len(current))
-        data = {k: current[i] for i, k in enumerate(HEADER)}
-        data.update({k: v for k, v in patch.items() if k in HEADER})
-        ws.update([[data.get(k, "") for k in HEADER]], f"A{idx}")
+        cur = ws.row_values(idx)
+        cur += [""] * (len(TASK_HEADER) - len(cur))
+        data = {k: cur[i] for i, k in enumerate(TASK_HEADER)}
+        data.update({k: v for k, v in patch.items() if k in TASK_HEADER})
+        ws.update([[data.get(k, "") for k in TASK_HEADER]], f"A{idx}")
         return data
 
-    def _delete(self, task_id: str) -> None:
-        ws = self._connect()
-        idx = self._row_index(task_id)
+    def _delete_task(self, task_id: str) -> None:
+        idx = self._task_row(task_id)
         if idx and idx > 1:
-            ws.delete_rows(idx)
+            self._tasks().delete_rows(idx)
 
-    # async API
-    async def list(self) -> list[dict]:
-        return await asyncio.to_thread(self._list)
+    # ---------- categories ----------
+    def _cats(self):
+        return self._ws("Categories", CAT_HEADER)
 
-    async def add(self, task: dict) -> dict:
-        return await asyncio.to_thread(self._add, task)
+    def _list_cats(self) -> list[dict]:
+        ws = self._cats()
+        rows = ws.get_all_records(expected_headers=CAT_HEADER)
+        if not rows:
+            for c in DEFAULT_CATS:
+                ws.append_row([c["name"], c["emoji"], c["color"]], value_input_option="RAW")
+            return DEFAULT_CATS.copy()
+        return [{k: str(r.get(k, "")) for k in CAT_HEADER} for r in rows]
 
-    async def update(self, task_id: str, patch: dict) -> Optional[dict]:
-        return await asyncio.to_thread(self._update, task_id, patch)
+    def _add_cat(self, c: dict) -> dict:
+        self._cats().append_row([c.get("name", ""), c.get("emoji", ""), c.get("color", "#888780")],
+                                value_input_option="RAW")
+        return c
 
-    async def delete(self, task_id: str) -> None:
-        await asyncio.to_thread(self._delete, task_id)
+    def _update_cat(self, name: str, patch: dict) -> None:
+        ws = self._cats()
+        for i, v in enumerate(ws.col_values(1), start=1):
+            if v == name and i > 1:
+                cur = ws.row_values(i); cur += [""] * (3 - len(cur))
+                d = {"name": cur[0], "emoji": cur[1], "color": cur[2]}
+                d.update({k: patch[k] for k in CAT_HEADER if k in patch})
+                ws.update([[d["name"], d["emoji"], d["color"]]], f"A{i}")
+                return
+
+    def _delete_cat(self, name: str) -> None:
+        ws = self._cats()
+        for i, v in enumerate(ws.col_values(1), start=1):
+            if v == name and i > 1:
+                ws.delete_rows(i); return
+
+    # ---------- comments ----------
+    def _comments(self):
+        return self._ws("Comments", COMMENT_HEADER)
+
+    def _list_comments(self, task_id: str) -> list[dict]:
+        rows = self._comments().get_all_records(expected_headers=COMMENT_HEADER)
+        return [{k: str(r.get(k, "")) for k in COMMENT_HEADER} for r in rows
+                if str(r.get("task_id", "")) == task_id]
+
+    def _add_comment(self, task_id: str, text: str) -> dict:
+        c = {"id": uuid.uuid4().hex[:8], "task_id": task_id, "text": text,
+             "created_at": datetime.now().isoformat(timespec="seconds")}
+        self._comments().append_row([c[k] for k in COMMENT_HEADER], value_input_option="RAW")
+        return c
+
+    # ---------- async API ----------
+    async def list_tasks(self):
+        return await asyncio.to_thread(self._list_tasks)
+
+    async def add_task(self, task):
+        return await asyncio.to_thread(self._add_task, task)
+
+    async def update_task(self, task_id, patch):
+        return await asyncio.to_thread(self._update_task, task_id, patch)
+
+    async def delete_task(self, task_id):
+        await asyncio.to_thread(self._delete_task, task_id)
+
+    async def list_cats(self):
+        return await asyncio.to_thread(self._list_cats)
+
+    async def add_cat(self, c):
+        return await asyncio.to_thread(self._add_cat, c)
+
+    async def update_cat(self, name, patch):
+        await asyncio.to_thread(self._update_cat, name, patch)
+
+    async def delete_cat(self, name):
+        await asyncio.to_thread(self._delete_cat, name)
+
+    async def list_comments(self, task_id):
+        return await asyncio.to_thread(self._list_comments, task_id)
+
+    async def add_comment(self, task_id, text):
+        return await asyncio.to_thread(self._add_comment, task_id, text)

@@ -1,8 +1,5 @@
 """Mini App backend: owner-only API поверх Google Sheets + отдача фронтенда.
-
-Каждый запрос к /api/* проверяет подпись Telegram initData и что это владелец.
-Фронтенд лежит в static/index.html и открывается как Telegram Mini App.
-"""
+Каждый запрос к /api/* проверяет подпись Telegram initData и что это владелец."""
 from __future__ import annotations
 
 import os
@@ -21,7 +18,6 @@ SHEET_ID = os.environ["SHEET_ID"]
 
 store = Sheets(SHEET_ID)
 app = FastAPI(title="Spender Tasks Mini App")
-
 HERE = os.path.dirname(__file__)
 
 
@@ -51,15 +47,30 @@ class TaskPatch(BaseModel):
     status: str | None = None
 
 
+class CatIn(BaseModel):
+    name: str
+    emoji: str = ""
+    color: str = "#888780"
+
+
+class CatPatch(BaseModel):
+    emoji: str | None = None
+    color: str | None = None
+
+
+class CommentIn(BaseModel):
+    text: str
+
+
 @app.get("/api/health")
 async def health():
     return {"ok": True}
 
 
+# ---- tasks ----
 @app.get("/api/tasks")
 async def list_tasks(user=Depends(require_owner)):
-    tasks = await store.list()
-    return [t for t in tasks if t.get("status") != "done"]
+    return [t for t in await store.list_tasks() if t.get("status") != "done"]
 
 
 @app.post("/api/tasks")
@@ -67,7 +78,7 @@ async def create_task(body: TaskIn, user=Depends(require_owner)):
     task = body.model_dump()
     if task.get("due_at"):
         task["remind_at"] = task["due_at"]
-    return await store.add(task)
+    return await store.add_task(task)
 
 
 @app.patch("/api/tasks/{task_id}")
@@ -77,7 +88,7 @@ async def update_task(task_id: str, body: TaskPatch, user=Depends(require_owner)
         patch["remind_at"] = patch["due_at"]
         patch["reminded"] = ""
         patch["last_nagged_at"] = ""
-    updated = await store.update(task_id, patch)
+    updated = await store.update_task(task_id, patch)
     if updated is None:
         raise HTTPException(status_code=404, detail="not found")
     return updated
@@ -85,7 +96,7 @@ async def update_task(task_id: str, body: TaskPatch, user=Depends(require_owner)
 
 @app.post("/api/tasks/{task_id}/done")
 async def complete_task(task_id: str, user=Depends(require_owner)):
-    updated = await store.update(task_id, {
+    updated = await store.update_task(task_id, {
         "status": "done",
         "completed_at": datetime.now().isoformat(timespec="seconds"),
     })
@@ -96,8 +107,43 @@ async def complete_task(task_id: str, user=Depends(require_owner)):
 
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: str, user=Depends(require_owner)):
-    await store.delete(task_id)
+    await store.delete_task(task_id)
     return {"ok": True}
+
+
+# ---- categories ----
+@app.get("/api/categories")
+async def list_cats(user=Depends(require_owner)):
+    return await store.list_cats()
+
+
+@app.post("/api/categories")
+async def add_cat(body: CatIn, user=Depends(require_owner)):
+    return await store.add_cat(body.model_dump())
+
+
+@app.patch("/api/categories/{name}")
+async def update_cat(name: str, body: CatPatch, user=Depends(require_owner)):
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    await store.update_cat(name, patch)
+    return {"ok": True}
+
+
+@app.delete("/api/categories/{name}")
+async def delete_cat(name: str, user=Depends(require_owner)):
+    await store.delete_cat(name)
+    return {"ok": True}
+
+
+# ---- comments ----
+@app.get("/api/tasks/{task_id}/comments")
+async def list_comments(task_id: str, user=Depends(require_owner)):
+    return await store.list_comments(task_id)
+
+
+@app.post("/api/tasks/{task_id}/comments")
+async def add_comment(task_id: str, body: CommentIn, user=Depends(require_owner)):
+    return await store.add_comment(task_id, body.text)
 
 
 @app.get("/")
