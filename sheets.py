@@ -72,7 +72,7 @@ class Sheets:
 
     def _list_tasks(self) -> list[dict]:
         ws = self._tasks()
-        rows = ws.get_all_records(expected_headers=TASK_HEADER)
+        rows = ws.get_all_records(expected_headers=TASK_HEADER, numericise_ignore=["all"])
         return [{k: str(r.get(k, "")) for k in TASK_HEADER} for r in rows]
 
     def _task_row(self, task_id: str) -> Optional[int]:
@@ -83,7 +83,7 @@ class Sheets:
 
     def _add_task(self, task: dict) -> dict:
         ws = self._tasks()
-        task.setdefault("id", uuid.uuid4().hex[:8])
+        task.setdefault("id", "t" + uuid.uuid4().hex[:7])
         task.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
         task.setdefault("status", "open")
         ws.append_row([task.get(k, "") for k in TASK_HEADER], value_input_option="RAW")
@@ -112,7 +112,7 @@ class Sheets:
 
     def _list_cats(self) -> list[dict]:
         ws = self._cats()
-        rows = ws.get_all_records(expected_headers=CAT_HEADER)
+        rows = ws.get_all_records(expected_headers=CAT_HEADER, numericise_ignore=["all"])
         if not rows:
             for c in DEFAULT_CATS:
                 ws.append_row([c["name"], c["emoji"], c["color"]], value_input_option="RAW")
@@ -145,12 +145,12 @@ class Sheets:
         return self._ws("Comments", COMMENT_HEADER)
 
     def _list_comments(self, task_id: str) -> list[dict]:
-        rows = self._comments().get_all_records(expected_headers=COMMENT_HEADER)
+        rows = self._comments().get_all_records(expected_headers=COMMENT_HEADER, numericise_ignore=["all"])
         return [{k: str(r.get(k, "")) for k in COMMENT_HEADER} for r in rows
                 if str(r.get("task_id", "")) == task_id]
 
     def _add_comment(self, task_id: str, text: str) -> dict:
-        c = {"id": uuid.uuid4().hex[:8], "task_id": task_id, "text": text,
+        c = {"id": "c" + uuid.uuid4().hex[:7], "task_id": task_id, "text": text,
              "created_at": datetime.now().isoformat(timespec="seconds")}
         self._comments().append_row([c[k] for k in COMMENT_HEADER], value_input_option="RAW")
         return c
