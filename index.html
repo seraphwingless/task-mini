@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Задачи</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{ --line:#EAE8E0; --muted:#888780; --bg:#F7F6F2; --accent:#185FA5; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"SF Pro","Segoe UI",Roboto,sans-serif;
+        color:#23221E; background:#fff; padding-bottom:64px; }
+  header{ padding:14px 16px 10px; border-bottom:.5px solid var(--line); }
+  h1{ font-size:18px; font-weight:600; margin:0; }
+  .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .add{ position:absolute; top:12px; right:14px; width:32px; height:32px; border-radius:50%;
+        background:var(--accent); color:#fff; border:none; font-size:20px; line-height:1; }
+  .filters{ display:flex; gap:6px; overflow-x:auto; padding:10px 16px; font-size:12px; }
+  .chip{ border:.5px solid #D3D1C7; padding:5px 10px; border-radius:20px; white-space:nowrap; background:#fff; }
+  .chip.on{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  #list{ padding:10px 14px 16px; background:var(--bg); min-height:60vh; }
+  .card{ display:flex; align-items:stretch; background:#fff; border:.5px solid var(--line);
+         border-radius:10px; overflow:hidden; margin-bottom:8px; transition:.2s; }
+  .band{ width:40px; flex:none; color:#fff; display:flex; align-items:center; justify-content:center;
+         font-size:14px; font-weight:600; }
+  .body{ padding:9px 11px; flex:1; min-width:0; }
+  .ttl{ font-size:14px; font-weight:500; margin-bottom:5px; word-break:break-word; }
+  .meta{ display:flex; align-items:center; gap:8px; font-size:11px; flex-wrap:wrap; }
+  .cat{ padding:2px 8px; border-radius:20px; }
+  .dl{ display:inline-flex; align-items:center; gap:3px; color:var(--muted); }
+  .cb{ width:22px; height:22px; border:1.5px solid #C3C1B8; border-radius:6px; align-self:center;
+       margin:0 12px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; }
+  .cb.on{ background:#1D9E75; border-color:#1D9E75; }
+  .ghead{ font-size:12px; color:#5F5E5A; font-weight:500; margin:8px 2px; }
+  .week{ display:grid; grid-template-columns:repeat(7,1fr); gap:3px; text-align:center; padding:8px 12px; }
+  .day{ padding:6px 0 4px; border-radius:9px; font-size:14px; }
+  .day.sel{ background:var(--accent); color:#fff; }
+  .dot{ width:4px; height:4px; border-radius:50%; margin:2px auto 0; }
+  nav{ position:fixed; bottom:0; left:0; right:0; display:grid; grid-template-columns:repeat(4,1fr);
+       background:#fff; border-top:.5px solid var(--line); text-align:center; font-size:10px; padding:6px 0 8px; }
+  nav div{ color:#B4B2A9; }
+  nav div.on{ color:var(--accent); }
+  nav .ic{ font-size:19px; display:block; margin-bottom:1px; }
+  .empty{ text-align:center; color:var(--muted); font-size:13px; padding:40px 0; }
+  .sheet{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:flex-end; z-index:10; }
+  .sheet.on{ display:flex; }
+  .panel{ background:#fff; width:100%; border-radius:16px 16px 0 0; padding:16px; }
+  .panel h2{ font-size:16px; margin:0 0 12px; }
+  .fld{ margin-bottom:12px; }
+  .fld label{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; display:block; margin-bottom:6px; }
+  input[type=text], input[type=datetime-local]{ width:100%; padding:10px 12px; border:.5px solid #D3D1C7;
+         border-radius:10px; font-size:15px; font-family:inherit; }
+  .row{ display:flex; gap:6px; flex-wrap:wrap; }
+  .btn{ width:100%; padding:12px; border:none; border-radius:10px; background:var(--accent); color:#fff;
+        font-size:15px; font-weight:500; margin-top:4px; }
+  .btn.ghost{ background:#F1EFE8; color:#5F5E5A; }
+</style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Сегодня</h1>
+    <div class="sub" id="sub"></div>
+    <button class="add" id="addBtn">+</button>
+  </header>
+
+  <div class="week" id="week" style="display:none"></div>
+  <div class="filters" id="filters"></div>
+  <div id="list"><div class="empty">Загрузка…</div></div>
+
+  <nav id="nav">
+    <div data-tab="calendar"><span class="ic">🗓</span>Календарь</div>
+    <div data-tab="today" class="on"><span class="ic">☀️</span>Сегодня</div>
+    <div data-tab="all"><span class="ic">📋</span>Все</div>
+    <div data-tab="settings"><span class="ic">⚙️</span>Настройки</div>
+  </nav>
+
+  <div class="sheet" id="sheet">
+    <div class="panel">
+      <h2 id="sheetTitle">Новая задача</h2>
+      <div class="fld"><label>Название</label><input type="text" id="fTitle" placeholder="Купить кофе"></div>
+      <div class="fld"><label>Категория</label><div class="row" id="fCat"></div></div>
+      <div class="fld"><label>Приоритет</label><div class="row" id="fPrio"></div></div>
+      <div class="fld"><label>Дедлайн (день и время до минуты)</label><input type="datetime-local" id="fDue"></div>
+      <button class="btn" id="fSave">Сохранить</button>
+      <button class="btn ghost" id="fCancel" style="margin-top:8px">Отмена</button>
+    </div>
+  </div>
+
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+const CATS = {
+  'личное': {e:'🙋‍♂️', bg:'#EAF3DE', t:'#3B6D11'},
+  'бизнес': {e:'💼', bg:'#E6F1FB', t:'#0C447C'},
+  'спорт':  {e:'⚽', bg:'#E1F5EE', t:'#0F6E56'},
+  'семья':  {e:'👨‍👩‍👧', bg:'#EEEDFE', t:'#3C3489'},
+};
+const PCOL = {P1:'#E24B4A',P2:'#D85A30',P3:'#EF9F27',P4:'#378ADD',P5:'#888780'};
+const state = { tab:'today', tasks:[], cat:'', selDay:null, editId:null };
+
+async function api(path, opts={}) {
+  const r = await fetch(path, Object.assign({}, opts, {
+    headers: Object.assign({
+      'Content-Type':'application/json',
+      'X-Telegram-Init-Data': tg ? tg.initData : ''
+    }, opts.headers||{})
+  }));
+  if (r.status === 401) { document.getElementById('list').innerHTML =
+    '<div class="empty">🔒 Доступ только у владельца.</div>'; throw new Error('401'); }
+  if (!r.ok) throw new Error('api '+r.status);
+  return r.status===204 ? null : r.json();
+}
+
+function parseDue(s){ if(!s) return null; const d=new Date(s); return isNaN(d)?null:d; }
+function urgency(due){
+  if(!due) return {text:'', emoji:''};
+  const ms = due - new Date();
+  if (ms < 0){ return {text:'просрочено', emoji:'🔥', over:true}; }
+  const m = Math.floor(ms/60000), d=Math.floor(m/1440), h=Math.floor((m%1440)/60), mi=m%60;
+  let text = (d?d+'д ':'')+(h||d?h+'ч ':'')+mi+'м';
+  let emoji = ms>2*86400000?'🟢': ms>86400000?'🟡': ms>12*3600000?'🟠':'🔴';
+  return {text, emoji};
+}
+function esc(s){ return (s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function cardHTML(t){
+  const c = CATS[t.category] || {e:'',bg:'#F1EFE8',t:'#5F5E5A'};
+  const u = urgency(parseDue(t.due_at));
+  const p = t.priority || 'P3';
+  return `<div class="card" data-id="${t.id}">
+    <div class="band" style="background:${PCOL[p]||'#888780'}">${p}</div>
+    <div class="body">
+      <div class="ttl">${esc(t.title)}</div>
+      <div class="meta">
+        ${t.category?`<span class="cat" style="background:${c.bg};color:${c.t}">${c.e} ${t.category}</span>`:''}
+        ${t.due_at?`<span class="dl" style="color:${u.over?'#A32D2D':'var(--muted)'}">⏰ ${u.text}</span><span>${u.emoji}</span>`:''}
+      </div>
+    </div>
+    <div class="cb" data-done="${t.id}"></div>
+  </div>`;
+}
+
+function bindCards(){
+  document.querySelectorAll('.cb').forEach(cb=>{
+    cb.onclick = async e=>{
+      const id = cb.getAttribute('data-done');
+      cb.classList.add('on'); cb.textContent='✓';
+      try { await api('/api/tasks/'+id+'/done', {method:'POST'});
+        state.tasks = state.tasks.filter(t=>t.id!==id);
+        const card = cb.closest('.card'); card.style.opacity='0'; card.style.transform='translateX(12px)';
+        setTimeout(render, 220);
+      } catch(err){ cb.classList.remove('on'); cb.textContent=''; }
+    };
+  });
+  document.querySelectorAll('.card').forEach(card=>{
+    card.querySelector('.body').onclick = ()=> openSheet(card.getAttribute('data-id'));
+  });
+}
+
+function filtered(){
+  let t = state.tasks.slice();
+  if (state.cat) t = t.filter(x=>x.category===state.cat);
+  return t;
+}
+function byPrio(a,b){ const o=x=>(parseDue(x.due_at)&&parseDue(x.due_at)<new Date())?0:1;
+  return o(a)-o(b) || (a.priority||'P3').localeCompare(b.priority||'P3'); }
+
+function render(){
+  const list = document.getElementById('list');
+  const week = document.getElementById('week');
+  const filters = document.getElementById('filters');
+  document.querySelectorAll('nav div').forEach(d=>d.classList.toggle('on', d.dataset.tab===state.tab));
+  week.style.display='none';
+  filters.style.display = (state.tab==='settings')?'none':'flex';
+  renderFilters();
+
+  if (state.tab==='settings'){ renderSettings(); return; }
+
+  let items = filtered();
+  const now = new Date();
+
+  if (state.tab==='today'){
+    document.getElementById('title').textContent='Сегодня';
+    const end = new Date(now); end.setHours(23,59,59,0);
+    items = items.filter(t=>{ const d=parseDue(t.due_at); return d && d<=end; });
+    document.getElementById('sub').textContent = now.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});
+  } else if (state.tab==='calendar'){
+    document.getElementById('title').textContent='Календарь';
+    document.getElementById('sub').textContent='';
+    week.style.display='grid'; renderWeek();
+    const sel = state.selDay || new Date();
+    items = items.filter(t=>{ const d=parseDue(t.due_at); return d && d.toDateString()===sel.toDateString(); });
+  } else {
+    document.getElementById('title').textContent='Все задачи';
+    document.getElementById('sub').textContent = items.length+' задач';
+  }
+
+  if (state.tab==='all'){
+    const groups={};
+    items.forEach(t=>{ (groups[t.category||'без категории']=groups[t.category||'без категории']||[]).push(t); });
+    let html='';
+    Object.keys(groups).forEach(k=>{
+      const c=CATS[k]||{e:''};
+      html+=`<div class="ghead">${c.e} ${k} · ${groups[k].length}</div>`;
+      html+=groups[k].sort(byPrio).map(cardHTML).join('');
+    });
+    list.innerHTML = html || '<div class="empty">Задач нет ✨</div>';
+  } else {
+    items.sort(byPrio);
+    list.innerHTML = items.map(cardHTML).join('') || '<div class="empty">Задач нет ✨</div>';
+  }
+  bindCards();
+}
+
+function renderFilters(){
+  const f=document.getElementById('filters'); if(state.tab==='settings'){f.innerHTML='';return;}
+  let html=`<span class="chip ${state.cat===''?'on':''}" data-c="">Все</span>`;
+  Object.keys(CATS).forEach(k=>{ html+=`<span class="chip ${state.cat===k?'on':''}" data-c="${k}">${CATS[k].e} ${k}</span>`; });
+  f.innerHTML=html;
+  f.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{ state.cat=ch.dataset.c; render(); });
+}
+
+function renderWeek(){
+  const w=document.getElementById('week'); const today=new Date();
+  const mon=new Date(today); mon.setDate(today.getDate()-((today.getDay()+6)%7));
+  const names=['Пн','Вт','Ср','Чт','Пт','Сб','Вс']; const sel=state.selDay||today;
+  let html='';
+  for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(mon.getDate()+i);
+    const has=state.tasks.some(t=>{const td=parseDue(t.due_at); return td&&td.toDateString()===d.toDateString();});
+    const isSel=d.toDateString()===sel.toDateString();
+    html+=`<div><div style="font-size:11px;color:#B4B2A9">${names[i]}</div>
+      <div class="day ${isSel?'sel':''}" data-day="${d.toISOString()}">${d.getDate()}
+      <div class="dot" style="background:${has?(isSel?'#fff':'#378ADD'):'transparent'}"></div></div></div>`;
+  }
+  w.innerHTML=html;
+  w.querySelectorAll('.day').forEach(el=>el.onclick=()=>{ state.selDay=new Date(el.dataset.day); render(); });
+}
+
+function renderSettings(){
+  document.getElementById('title').textContent='Настройки';
+  document.getElementById('sub').textContent='';
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let cats = Object.keys(CATS).map(k=>`<div style="display:flex;justify-content:space-between;padding:11px 12px;border-bottom:.5px solid var(--line)"><span>${CATS[k].e} ${k}</span><span style="color:var(--muted)">›</span></div>`).join('');
+  document.getElementById('list').innerHTML =
+    `<div style="font-size:11px;color:#B4B2A9;text-transform:uppercase;margin:6px 4px">Категории</div>
+     <div style="background:#fff;border:.5px solid var(--line);border-radius:12px;overflow:hidden">${cats}</div>
+     <div style="font-size:11px;color:#B4B2A9;text-transform:uppercase;margin:16px 4px 6px">Время</div>
+     <div style="background:#fff;border:.5px solid var(--line);border-radius:12px;padding:11px 12px;display:flex;justify-content:space-between"><span>Часовой пояс</span><span style="color:var(--muted)">авто · ${tz}</span></div>
+     <div style="font-size:11px;color:#B4B2A9;margin:16px 4px">Напоминания, тема, дайджест — в разработке.</div>`;
+}
+
+// ---- create/edit sheet ----
+function buildSheetControls(){
+  const c=document.getElementById('fCat');
+  c.innerHTML=Object.keys(CATS).map(k=>`<span class="chip" data-c="${k}">${CATS[k].e} ${k}</span>`).join('');
+  const p=document.getElementById('fPrio');
+  p.innerHTML=['P1','P2','P3','P4','P5'].map(x=>`<span class="chip" data-p="${x}">${x}</span>`).join('');
+  let selC='', selP='P3';
+  c.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{ selC=ch.dataset.c;
+    c.querySelectorAll('.chip').forEach(x=>x.classList.remove('on')); ch.classList.add('on'); });
+  p.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{ selP=ch.dataset.p;
+    p.querySelectorAll('.chip').forEach(x=>x.classList.remove('on')); ch.classList.add('on'); });
+  return { get cat(){return selC;}, set cat(v){selC=v; c.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x.dataset.c===v));},
+           get prio(){return selP;}, set prio(v){selP=v; p.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x.dataset.p===v));} };
+}
+let ctrls=null;
+function openSheet(id){
+  if(!ctrls) ctrls=buildSheetControls();
+  state.editId=id||null;
+  const t = id ? state.tasks.find(x=>x.id===id) : null;
+  document.getElementById('sheetTitle').textContent = id?'Задача':'Новая задача';
+  document.getElementById('fTitle').value = t?t.title:'';
+  ctrls.cat = t?t.category:''; ctrls.prio = t?(t.priority||'P3'):'P3';
+  document.getElementById('fDue').value = t&&t.due_at ? t.due_at.slice(0,16) : '';
+  document.getElementById('sheet').classList.add('on');
+}
+function closeSheet(){ document.getElementById('sheet').classList.remove('on'); }
+
+document.getElementById('addBtn').onclick=()=>openSheet(null);
+document.getElementById('fCancel').onclick=closeSheet;
+document.getElementById('fSave').onclick=async ()=>{
+  const title=document.getElementById('fTitle').value.trim(); if(!title){ return; }
+  const due=document.getElementById('fDue').value; // 'YYYY-MM-DDTHH:MM'
+  const payload={ title, category:ctrls.cat, priority:ctrls.prio,
+                  due_at: due?due+':00':'' };
+  try{
+    if(state.editId){ await api('/api/tasks/'+state.editId,{method:'PATCH',body:JSON.stringify(payload)}); }
+    else{ await api('/api/tasks',{method:'POST',body:JSON.stringify(payload)}); }
+    closeSheet(); await load();
+  }catch(e){}
+};
+
+document.querySelectorAll('nav div').forEach(d=>d.onclick=()=>{ state.tab=d.dataset.tab; state.selDay=null; render(); });
+
+async function load(){
+  try{ state.tasks = await api('/api/tasks'); render(); }
+  catch(e){ /* 401 handled in api */ }
+}
+load();
+</script>
+</body>
+</html>
