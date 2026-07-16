@@ -130,12 +130,19 @@
     <button class="btn ghost" id="cCancel">Отмена</button>
   </div></div>
 
+  <div class="scrim" id="optScrim"><div class="panel">
+    <h2 id="optTitle">Выбор</h2>
+    <div id="optList"></div>
+    <button class="btn ghost" id="optCancel" style="margin-top:8px">Отмена</button>
+  </div></div>
+
 <script>
 const tg = window.Telegram ? window.Telegram.WebApp : null;
 if (tg) { tg.ready(); tg.expand(); }
 const PCOL = {P1:'#E24B4A',P2:'#D85A30',P3:'#EF9F27',P4:'#378ADD',P5:'#888780'};
 const PALETTE = ['#639922','#378ADD','#1D9E75','#7F77DD','#D85A30','#E24B4A','#EF9F27','#888780'];
-const state = { tab:'today', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null };
+const state = { tab:'today', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null, settings:{} };
+function S(k, def){ return (state.settings && state.settings[k]!=null && state.settings[k]!=='') ? state.settings[k] : def; }
 
 function catMeta(name){ const c=state.cats.find(x=>x.name===name); return c||{name,emoji:'',color:'#888780'}; }
 function tint(hex){ return hex+'22'; }
@@ -149,13 +156,17 @@ async function api(path, opts={}) {
 }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function parseDue(s){ if(!s) return null; const d=new Date(s.replace(' ','T')); return isNaN(d)?null:d; }
+function defaultDueLocal(){ const d=new Date(); d.setHours(d.getHours()+1,0,0,0);
+  const p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes()); }
 function urgency(due){
   if(!due) return {text:'',emoji:''};
   const ms=due-new Date();
   if(ms<0) return {text:'просрочено',emoji:'🔥',over:true};
   const m=Math.floor(ms/60000),d=Math.floor(m/1440),h=Math.floor((m%1440)/60),mi=m%60;
   const text=(d?d+'д ':'')+((h||d)?h+'ч ':'')+mi+'м';
-  const emoji=ms>172800000?'🟢':ms>86400000?'🟡':ms>43200000?'🟠':'🔴';
+  const gh=+S('urg_green_h',48)*3600000, yh=+S('urg_yellow_h',24)*3600000, oh=+S('urg_orange_h',12)*3600000;
+  const emoji=ms>gh?'🟢':ms>yh?'🟡':ms>oh?'🟠':'🔴';
   return {text,emoji};
 }
 
@@ -240,6 +251,12 @@ document.getElementById('wPrev').onclick=()=>{state.weekOff--;render();};
 document.getElementById('wNext').onclick=()=>{state.weekOff++;render();};
 
 function tgHTML(on){ return `<span class="tg" style="background:${on?'#1D9E75':'#D3D1C7'}"><i style="left:${on?'19px':'2.5px'}"></i></span>`; }
+const NAG={"30":"раз в 30 мин","60":"раз в час","120":"раз в 2 часа","180":"раз в 3 часа","0":"выключено"};
+const LEAD={"0":"выключено","15":"за 15 мин","30":"за 30 мин","60":"за 1 час","120":"за 2 часа","1440":"за день"};
+const THEME={"auto":"как в Telegram","light":"светлая","dark":"тёмная"};
+function urgLabel(){ const g=+S('urg_green_h',48); return g>=72?'мягкие':(g<=24?'жёсткие':'стандарт'); }
+function opt(label,patch){ return {label,patch}; }
+
 function renderSettings(){
   document.getElementById('title').textContent='Настройки'; document.getElementById('sub').textContent='';
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -249,25 +266,44 @@ function renderSettings(){
     <div class="sgroup">${cats}<div class="srow" id="addCat" style="color:var(--accent);font-weight:500">+ Добавить категорию</div></div>
     <div class="slabel">Задачи</div>
     <div class="sgroup">
-      <div class="srow"><span>Приоритет по умолчанию</span><span class="val">P3 ›</span></div>
-      <div class="srow"><span>Пороги срочности 🟢🟡🟠🔴</span><span class="val">›</span></div>
+      <div class="srow" id="sPrio"><span>Приоритет по умолчанию</span><span class="val">${S('default_priority','P3')} ›</span></div>
+      <div class="srow" id="sUrg"><span>Пороги срочности 🟢🟡🟠🔴</span><span class="val">${urgLabel()} ›</span></div>
     </div>
     <div class="slabel">Напоминания</div>
     <div class="sgroup">
-      <div class="srow"><span>Пинать при просрочке</span><span class="val">раз в час ›</span></div>
-      <div class="srow"><span>Напоминать заранее</span><span class="val">за 1 час ›</span></div>
-      <div class="srow"><span>Тихие часы</span>${tgHTML(true)}</div>
-      <div class="srow"><span>Утренний дайджест</span>${tgHTML(true)}</div>
+      <div class="srow" id="sNag"><span>Пинать при просрочке</span><span class="val">${NAG[S('nag_interval_min','60')]||'раз в час'} ›</span></div>
+      <div class="srow" id="sLead"><span>Напоминать заранее</span><span class="val">${LEAD[S('lead_time_min','60')]||'за 1 час'} ›</span></div>
+      <div class="srow"><span>Тихие часы (${S('quiet_start','23:00')}–${S('quiet_end','08:00')})</span><span class="tg2" data-k="quiet_on">${tgHTML(S('quiet_on','1')==='1')}</span></div>
+      <div class="srow"><span>Утренний дайджест (${S('digest_time','08:00')})</span><span class="tg2" data-k="digest_on">${tgHTML(S('digest_on','1')==='1')}</span></div>
     </div>
     <div class="slabel">Время</div>
     <div class="sgroup"><div class="srow"><span>Часовой пояс</span><span class="val">авто · ${tz}</span></div></div>
     <div class="slabel">Оформление</div>
-    <div class="sgroup"><div class="srow"><span>Тема</span><span class="val">как в Telegram ›</span></div></div>
-    <div style="height:20px"></div>`;
+    <div class="sgroup"><div class="srow" id="sTheme"><span>Тема</span><span class="val">${THEME[S('theme','auto')]||'как в Telegram'} ›</span></div></div>
+    <div style="height:24px"></div>`;
   document.getElementById('addCat').onclick=()=>openCat(null);
   document.querySelectorAll('.catrow').forEach(r=>r.onclick=()=>openCat(r.dataset.c));
-  document.querySelectorAll('.tg').forEach(t=>t.onclick=()=>{const on=t.style.background.includes('29, 158');t.style.background=on?'#D3D1C7':'#1D9E75';t.firstElementChild.style.left=on?'2.5px':'19px';});
+  document.getElementById('sPrio').onclick=()=>openOpts('Приоритет по умолчанию',['P1','P2','P3','P4','P5'].map(p=>opt(p,{default_priority:p})));
+  document.getElementById('sUrg').onclick=()=>openOpts('Пороги срочности',[
+    opt('мягкие (🟢>3д, 🔴<1д)',{urg_green_h:72,urg_yellow_h:48,urg_orange_h:24}),
+    opt('стандарт (🟢>2д, 🔴<12ч)',{urg_green_h:48,urg_yellow_h:24,urg_orange_h:12}),
+    opt('жёсткие (🟢>1д, 🔴<4ч)',{urg_green_h:24,urg_yellow_h:12,urg_orange_h:4})]);
+  document.getElementById('sNag').onclick=()=>openOpts('Пинать при просрочке',Object.keys(NAG).map(v=>opt(NAG[v],{nag_interval_min:v})));
+  document.getElementById('sLead').onclick=()=>openOpts('Напоминать заранее',Object.keys(LEAD).map(v=>opt(LEAD[v],{lead_time_min:v})));
+  document.getElementById('sTheme').onclick=()=>openOpts('Тема',Object.keys(THEME).map(v=>opt(THEME[v],{theme:v})));
+  document.querySelectorAll('.tg2').forEach(t=>t.onclick=()=>{const k=t.dataset.k; saveSettings({[k]: S(k,'1')==='1'?'0':'1'});});
 }
+function openOpts(title, options){
+  document.getElementById('optTitle').textContent=title;
+  const el=document.getElementById('optList');
+  el.innerHTML=options.map((o,i)=>`<div class="srow optrow" data-i="${i}" style="border-bottom:1px solid #F0EEE7"><span>${o.label}</span></div>`).join('');
+  el.querySelectorAll('.optrow').forEach(r=>r.onclick=()=>{ saveSettings(options[+r.dataset.i].patch); document.getElementById('optScrim').classList.remove('on'); });
+  document.getElementById('optScrim').classList.add('on');
+}
+async function saveSettings(patch){
+  try{ state.settings=await api('/api/settings',{method:'PUT',body:JSON.stringify(patch)}); if(state.tab==='settings') renderSettings(); }catch(e){}
+}
+document.getElementById('optCancel').onclick=()=>document.getElementById('optScrim').classList.remove('on');
 
 function chipRow(el, items, getLabel, selected, onSel){
   el.innerHTML=items.map(x=>`<span class="chip ${x===selected?'on':''}" data-v="${x}">${getLabel(x)}</span>`).join('');
@@ -279,10 +315,10 @@ async function openTask(id){
   const t=id?state.tasks.find(x=>x.id===id):null;
   document.getElementById('tsTitle').textContent=id?'Задача':'Новая задача';
   document.getElementById('fTitle').value=t?t.title:'';
-  curCat=t?t.category:''; curPrio=t?(t.priority||'P3'):'P3';
+  curCat=t?t.category:''; curPrio=t?(t.priority||'P3'):S('default_priority','P3');
   chipRow(document.getElementById('fCat'), state.cats.map(c=>c.name), n=>`${catMeta(n).emoji} ${n}`, curCat, v=>curCat=v);
   chipRow(document.getElementById('fPrio'), ['P1','P2','P3','P4','P5'], x=>x, curPrio, v=>curPrio=v);
-  document.getElementById('fDue').value=t&&t.due_at?t.due_at.slice(0,16):'';
+  document.getElementById('fDue').value=t?(t.due_at?t.due_at.slice(0,16):''):defaultDueLocal();
   document.getElementById('fDelete').style.display=id?'block':'none';
   document.getElementById('cmtWrap').style.display=id?'block':'none';
   document.getElementById('cmtList').innerHTML=''; document.getElementById('cmtInput').value='';
@@ -343,8 +379,9 @@ document.getElementById('cDelete').onclick=async()=>{
 document.querySelectorAll('nav div').forEach(d=>d.onclick=()=>{state.tab=d.dataset.tab;state.selDay=null;render();});
 
 async function loadCats(){ try{ state.cats=await api('/api/categories'); }catch(e){ state.cats=[]; } }
+async function loadSettings(){ try{ state.settings=await api('/api/settings'); }catch(e){ state.settings={}; } }
 async function load(){ try{ state.tasks=await api('/api/tasks'); render(); }catch(e){} }
-(async()=>{ await loadCats(); await load(); })();
+(async()=>{ await loadSettings(); await loadCats(); await load(); })();
 </script>
 </body>
 </html>

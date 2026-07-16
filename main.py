@@ -146,6 +146,17 @@ async def add_comment(task_id: str, body: CommentIn, user=Depends(require_owner)
     return await store.add_comment(task_id, body.text)
 
 
+# ---- settings ----
+@app.get("/api/settings")
+async def get_settings(user=Depends(require_owner)):
+    return await store.get_settings()
+
+
+@app.put("/api/settings")
+async def put_settings(body: dict, user=Depends(require_owner)):
+    return await store.set_settings(body)
+
+
 @app.get("/")
 async def index():
     return FileResponse(os.path.join(HERE, "index.html"))

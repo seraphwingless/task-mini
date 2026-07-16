@@ -25,6 +25,22 @@ TASK_HEADER = [
 ]
 CAT_HEADER = ["name", "emoji", "color"]
 COMMENT_HEADER = ["id", "task_id", "text", "created_at"]
+SETTINGS_HEADER = ["key", "value"]
+
+DEFAULT_SETTINGS = {
+    "default_priority": "P3",
+    "urg_green_h": "48",
+    "urg_yellow_h": "24",
+    "urg_orange_h": "12",
+    "nag_interval_min": "60",
+    "lead_time_min": "60",
+    "quiet_on": "1",
+    "quiet_start": "23:00",
+    "quiet_end": "08:00",
+    "digest_on": "1",
+    "digest_time": "08:00",
+    "theme": "auto",
+}
 
 DEFAULT_CATS = [
     {"name": "личное", "emoji": "🙋‍♂️", "color": "#639922"},
@@ -155,7 +171,39 @@ class Sheets:
         self._comments().append_row([c[k] for k in COMMENT_HEADER], value_input_option="RAW")
         return c
 
+    # ---------- settings ----------
+    def _settings_ws(self):
+        return self._ws("Settings", SETTINGS_HEADER)
+
+    def _get_settings(self) -> dict:
+        ws = self._settings_ws()
+        rows = ws.get_all_records(expected_headers=SETTINGS_HEADER, numericise_ignore=["all"])
+        stored = {str(r.get("key", "")): str(r.get("value", "")) for r in rows}
+        if not stored:
+            for k, v in DEFAULT_SETTINGS.items():
+                ws.append_row([k, v], value_input_option="RAW")
+            return dict(DEFAULT_SETTINGS)
+        return {**DEFAULT_SETTINGS, **stored}
+
+    def _set_settings(self, patch: dict) -> dict:
+        ws = self._settings_ws()
+        keys = ws.col_values(1)
+        for k, v in patch.items():
+            v = str(v)
+            if k in keys:
+                ws.update([[k, v]], f"A{keys.index(k) + 1}")
+            else:
+                ws.append_row([k, v], value_input_option="RAW")
+                keys.append(k)
+        return self._get_settings()
+
     # ---------- async API ----------
+    async def get_settings(self):
+        return await asyncio.to_thread(self._get_settings)
+
+    async def set_settings(self, patch):
+        return await asyncio.to_thread(self._set_settings, patch)
+
     async def list_tasks(self):
         return await asyncio.to_thread(self._list_tasks)
 
