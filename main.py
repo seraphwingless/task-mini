@@ -54,6 +54,7 @@ class CatIn(BaseModel):
 
 
 class CatPatch(BaseModel):
+    name: str | None = None
     emoji: str | None = None
     color: str | None = None
 

@@ -60,9 +60,12 @@
   .panel h2{ font-size:18px; margin:0 0 16px; }
   .fld{ margin-bottom:14px; }
   .fld label{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:7px; font-weight:600; }
-  input[type=text], input[type=datetime-local]{ width:100%; padding:12px 13px; border:1px solid #DEDCD3;
+  input[type=text], input[type=datetime-local], textarea{ width:100%; padding:12px 13px; border:1px solid #DEDCD3;
          border-radius:12px; font-size:16px; font-family:inherit; background:#fff; color:var(--ink); }
-  input:focus{ outline:none; border-color:var(--accent); }
+  textarea{ resize:vertical; min-height:44px; line-height:1.4; }
+  input:focus, textarea:focus{ outline:none; border-color:var(--accent); }
+  .cmt .b{ white-space:pre-wrap; word-break:break-word; }
+  .cmt .b a{ color:var(--accent); }
   .row{ display:flex; gap:7px; flex-wrap:wrap; }
   .btn{ width:100%; padding:14px; border:none; border-radius:13px; background:var(--accent); color:#fff;
         font-size:16px; font-weight:600; margin-top:6px; }
@@ -81,6 +84,14 @@
   .tg{ width:42px; height:25px; border-radius:22px; position:relative; flex:none; transition:.15s; }
   .tg i{ position:absolute; top:2.5px; width:20px; height:20px; border-radius:50%; background:#fff; transition:.15s; }
   .val{ color:var(--muted); font-size:14px; display:flex; align-items:center; gap:6px; }
+  html[data-theme="dark"]{ --line:#2C2C2E; --muted:#9A988F; --bg:#0E0E10; --ink:#ECEAE3; }
+  html[data-theme="dark"] body{ background:#0E0E10; }
+  html[data-theme="dark"] main{ background:#0E0E10; }
+  html[data-theme="dark"] .card, html[data-theme="dark"] .sgroup, html[data-theme="dark"] nav,
+  html[data-theme="dark"] .panel, html[data-theme="dark"] input, html[data-theme="dark"] textarea{ background:#1C1C1E; color:var(--ink); }
+  html[data-theme="dark"] input, html[data-theme="dark"] textarea{ border-color:#3A3A3C; }
+  html[data-theme="dark"] .chip{ background:#1C1C1E; color:#ECEAE3; border-color:#3A3A3C; }
+  html[data-theme="dark"] .chip.on{ background:var(--accent); color:#fff; }
 </style>
 </head>
 <body>
@@ -98,8 +109,8 @@
   <main><div id="list"><div class="empty"><div class="big">⏳</div>Загрузка…</div></div></main>
 
   <nav id="nav">
-    <div data-tab="calendar"><span class="ic">🗓</span>Календарь</div>
-    <div data-tab="today" class="on"><span class="ic">☀️</span>Сегодня</div>
+    <div data-tab="calendar" class="on"><span class="ic">🗓</span>Календарь</div>
+    <div data-tab="today"><span class="ic">☀️</span>Сегодня</div>
     <div data-tab="all"><span class="ic">📋</span>Все</div>
     <div data-tab="settings"><span class="ic">⚙️</span>Настройки</div>
   </nav>
@@ -113,7 +124,7 @@
     <div id="cmtWrap" style="display:none">
       <div class="fld" style="margin-bottom:6px"><label>Комментарии</label></div>
       <div id="cmtList"></div>
-      <div class="cmtbar"><input type="text" id="cmtInput" placeholder="Написать комментарий…"><button class="btn" id="cmtAdd">→</button></div>
+      <div class="cmtbar"><textarea id="cmtInput" rows="2" placeholder="Написать комментарий… (можно несколько строк)"></textarea><button class="btn" id="cmtAdd">→</button></div>
     </div>
     <button class="btn" id="fSave" style="margin-top:14px">Сохранить</button>
     <button class="btn danger" id="fDelete" style="display:none">Удалить задачу</button>
@@ -141,7 +152,7 @@ const tg = window.Telegram ? window.Telegram.WebApp : null;
 if (tg) { tg.ready(); tg.expand(); }
 const PCOL = {P1:'#E24B4A',P2:'#D85A30',P3:'#EF9F27',P4:'#378ADD',P5:'#888780'};
 const PALETTE = ['#639922','#378ADD','#1D9E75','#7F77DD','#D85A30','#E24B4A','#EF9F27','#888780'];
-const state = { tab:'today', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null, settings:{} };
+const state = { tab:'calendar', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null, settings:{} };
 function S(k, def){ return (state.settings && state.settings[k]!=null && state.settings[k]!=='') ? state.settings[k] : def; }
 
 function catMeta(name){ const c=state.cats.find(x=>x.name===name); return c||{name,emoji:'',color:'#888780'}; }
@@ -155,6 +166,7 @@ async function api(path, opts={}) {
   const txt = await r.text(); return txt?JSON.parse(txt):null;
 }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function linkify(s){ return esc(s).replace(/(https?:\/\/[^\s]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>'); }
 function parseDue(s){ if(!s) return null; const d=new Date(s.replace(' ','T')); return isNaN(d)?null:d; }
 function defaultDueLocal(){ const d=new Date(); d.setHours(d.getHours()+1,0,0,0);
   const p=n=>String(n).padStart(2,'0');
@@ -301,7 +313,12 @@ function openOpts(title, options){
   document.getElementById('optScrim').classList.add('on');
 }
 async function saveSettings(patch){
-  try{ state.settings=await api('/api/settings',{method:'PUT',body:JSON.stringify(patch)}); if(state.tab==='settings') renderSettings(); }catch(e){}
+  try{ state.settings=await api('/api/settings',{method:'PUT',body:JSON.stringify(patch)}); applyTheme(); if(state.tab==='settings') renderSettings(); }catch(e){}
+}
+function applyTheme(){
+  let mode=S('theme','auto');
+  if(mode==='auto') mode=(tg&&tg.colorScheme)?tg.colorScheme:'light';
+  document.documentElement.setAttribute('data-theme', mode==='dark'?'dark':'light');
 }
 document.getElementById('optCancel').onclick=()=>document.getElementById('optScrim').classList.remove('on');
 
@@ -328,7 +345,7 @@ async function openTask(id){
 function closeTask(){ document.getElementById('taskScrim').classList.remove('on'); }
 async function loadComments(id){
   try{ const cs=await api('/api/tasks/'+id+'/comments');
-    document.getElementById('cmtList').innerHTML=cs.map(c=>`<div class="cmt"><div class="t">${new Date(c.created_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div><div class="b">${esc(c.text)}</div></div>`).join('')||'<div style="color:#B4B2A9;font-size:13px;margin-bottom:8px">Пока нет комментариев.</div>';
+    document.getElementById('cmtList').innerHTML=cs.map(c=>`<div class="cmt"><div class="t">${new Date(c.created_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div><div class="b">${linkify(c.text)}</div></div>`).join('')||'<div style="color:#B4B2A9;font-size:13px;margin-bottom:8px">Пока нет комментариев.</div>';
   }catch(e){}
 }
 document.getElementById('cmtAdd').onclick=async()=>{
@@ -354,7 +371,7 @@ let curColor=PALETTE[0];
 function openCat(name){
   state.catEdit=name||null; const c=name?catMeta(name):null;
   document.getElementById('csTitle').textContent=name?'Категория':'Новая категория';
-  document.getElementById('cName').value=name||''; document.getElementById('cName').disabled=!!name;
+  document.getElementById('cName').value=name||''; document.getElementById('cName').disabled=false;
   document.getElementById('cEmoji').value=c?c.emoji:''; curColor=c?c.color:PALETTE[0];
   const cc=document.getElementById('cColors');
   cc.innerHTML=PALETTE.map(col=>`<span data-col="${col}" style="width:30px;height:30px;border-radius:50%;background:${col};border:${col===curColor?'3px solid #23221E':'3px solid transparent'}"></span>`).join('');
@@ -367,9 +384,10 @@ document.getElementById('cCancel').onclick=closeCat;
 document.getElementById('cSave').onclick=async()=>{
   const name=document.getElementById('cName').value.trim(), emoji=document.getElementById('cEmoji').value.trim();
   if(!name) return;
-  try{ if(state.catEdit) await api('/api/categories/'+encodeURIComponent(name),{method:'PATCH',body:JSON.stringify({emoji,color:curColor})});
+  try{ if(state.catEdit) await api('/api/categories/'+encodeURIComponent(state.catEdit),{method:'PATCH',body:JSON.stringify({name,emoji,color:curColor})});
        else await api('/api/categories',{method:'POST',body:JSON.stringify({name,emoji,color:curColor})});
-       closeCat(); await loadCats(); render(); }catch(e){}
+       if(state.cat===state.catEdit) state.cat=name;
+       closeCat(); await loadCats(); await load(); }catch(e){}
 };
 document.getElementById('cDelete').onclick=async()=>{
   if(!state.catEdit) return;
@@ -381,7 +399,7 @@ document.querySelectorAll('nav div').forEach(d=>d.onclick=()=>{state.tab=d.datas
 async function loadCats(){ try{ state.cats=await api('/api/categories'); }catch(e){ state.cats=[]; } }
 async function loadSettings(){ try{ state.settings=await api('/api/settings'); }catch(e){ state.settings={}; } }
 async function load(){ try{ state.tasks=await api('/api/tasks'); render(); }catch(e){} }
-(async()=>{ await loadSettings(); await loadCats(); await load(); })();
+(async()=>{ await loadSettings(); applyTheme(); await loadCats(); await load(); })();
 </script>
 </body>
 </html>

@@ -142,13 +142,22 @@ class Sheets:
 
     def _update_cat(self, name: str, patch: dict) -> None:
         ws = self._cats()
+        new_name = str(patch.get("name") or name).strip() or name
         for i, v in enumerate(ws.col_values(1), start=1):
             if v == name and i > 1:
                 cur = ws.row_values(i); cur += [""] * (3 - len(cur))
                 d = {"name": cur[0], "emoji": cur[1], "color": cur[2]}
-                d.update({k: patch[k] for k in CAT_HEADER if k in patch})
+                for k in CAT_HEADER:
+                    if patch.get(k) is not None:
+                        d[k] = str(patch[k])
                 ws.update([[d["name"], d["emoji"], d["color"]]], f"A{i}")
-                return
+                break
+        if new_name != name:                       # переименование — переносим задачи
+            tw = self._tasks()
+            col = TASK_HEADER.index("category") + 1
+            for i, v in enumerate(tw.col_values(col), start=1):
+                if i > 1 and v == name:
+                    tw.update_cell(i, col, new_name)
 
     def _delete_cat(self, name: str) -> None:
         ws = self._cats()
