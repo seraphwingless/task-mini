@@ -243,7 +243,11 @@ function bind(){
   });
   document.querySelectorAll('[data-open]').forEach(el=>el.onclick=()=>openTask(el.getAttribute('data-open')));
 }
-function byPrio(a,b){ const o=x=>{const d=parseDue(x.due_at);return d&&d<new Date()?0:1;}; return o(a)-o(b)||(a.priority||'P3').localeCompare(b.priority||'P3'); }
+function byPrio(a,b){
+  const o=x=>{const d=parseDue(x.due_at);return d&&d<new Date()?0:1;};
+  const da=a.due_at||'9999', db=b.due_at||'9999';
+  return o(a)-o(b) || (a.priority||'P3').localeCompare(b.priority||'P3') || (da<db?-1:da>db?1:0);
+}
 function visible(){ let t=state.tasks.slice(); if(state.cat) t=t.filter(x=>x.category===state.cat); return t; }
 
 function lockScreen(){
