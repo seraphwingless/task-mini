@@ -66,6 +66,15 @@
   input:focus, textarea:focus{ outline:none; border-color:var(--accent); }
   .cmt .b{ white-space:pre-wrap; word-break:break-word; }
   .cmt .b a{ color:var(--accent); }
+  .duefield{ width:100%; padding:12px 13px; border:1px solid #DEDCD3; border-radius:12px; font-size:16px; background:#fff; color:var(--ink); }
+  html[data-theme="dark"] .duefield{ background:#1C1C1E; border-color:#3A3A3C; }
+  .wheels{ position:relative; display:flex; gap:8px; height:200px; margin:6px 0 14px; }
+  .wheelcol{ flex:1; overflow-y:scroll; scroll-snap-type:y mandatory; text-align:center; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .wheelcol::-webkit-scrollbar{ display:none; }
+  .wheelcol .wi{ height:40px; line-height:40px; scroll-snap-align:center; font-size:17px; color:var(--muted); white-space:nowrap; }
+  .wheelcol .wi.sel{ color:var(--ink); font-weight:600; }
+  .wheelcol .pad{ height:80px; }
+  .wheelband{ position:absolute; left:0; right:0; top:80px; height:40px; border-top:1px solid var(--accent); border-bottom:1px solid var(--accent); pointer-events:none; opacity:.5; }
   .row{ display:flex; gap:7px; flex-wrap:wrap; }
   .btn{ width:100%; padding:14px; border:none; border-radius:13px; background:var(--accent); color:#fff;
         font-size:16px; font-weight:600; margin-top:6px; }
@@ -120,7 +129,7 @@
     <div class="fld"><label>Название</label><input type="text" id="fTitle" placeholder="Купить кофе"></div>
     <div class="fld"><label>Категория</label><div class="row" id="fCat"></div></div>
     <div class="fld"><label>Приоритет</label><div class="row" id="fPrio"></div></div>
-    <div class="fld"><label>Дедлайн (день и время до минуты)</label><input type="datetime-local" id="fDue"></div>
+    <div class="fld"><label>Дедлайн</label><div id="dueBtn" class="duefield">Сегодня</div></div>
     <div id="cmtWrap" style="display:none">
       <div class="fld" style="margin-bottom:6px"><label>Комментарии</label></div>
       <div id="cmtList"></div>
@@ -145,6 +154,23 @@
     <h2 id="optTitle">Выбор</h2>
     <div id="optList"></div>
     <button class="btn ghost" id="optCancel" style="margin-top:8px">Отмена</button>
+  </div></div>
+
+  <div class="scrim" id="dueScrim"><div class="panel">
+    <h2>Дедлайн</h2>
+    <div class="row" style="margin-bottom:6px">
+      <span class="chip" id="qToday">Сегодня</span>
+      <span class="chip" id="qTomorrow">Завтра</span>
+      <span class="chip" id="qNone">Без дедлайна</span>
+    </div>
+    <div class="wheels">
+      <div class="wheelcol" id="wDate"></div>
+      <div class="wheelcol" id="wHour"></div>
+      <div class="wheelcol" id="wMin"></div>
+      <div class="wheelband"></div>
+    </div>
+    <button class="btn" id="dueDone">Готово</button>
+    <button class="btn ghost" id="dueCancel">Отмена</button>
   </div></div>
 
 <script>
@@ -326,7 +352,7 @@ function chipRow(el, items, getLabel, selected, onSel){
   el.innerHTML=items.map(x=>`<span class="chip ${x===selected?'on':''}" data-v="${x}">${getLabel(x)}</span>`).join('');
   el.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{ el.querySelectorAll('.chip').forEach(c=>c.classList.remove('on')); ch.classList.add('on'); onSel(ch.dataset.v); });
 }
-let curCat='', curPrio='P3';
+let curCat='', curPrio='P3', curDue='';
 async function openTask(id){
   state.editId=id||null;
   const t=id?state.tasks.find(x=>x.id===id):null;
@@ -335,7 +361,7 @@ async function openTask(id){
   curCat=t?t.category:''; curPrio=t?(t.priority||'P3'):S('default_priority','P3');
   chipRow(document.getElementById('fCat'), state.cats.map(c=>c.name), n=>`${catMeta(n).emoji} ${n}`, curCat, v=>curCat=v);
   chipRow(document.getElementById('fPrio'), ['P1','P2','P3','P4','P5'], x=>x, curPrio, v=>curPrio=v);
-  document.getElementById('fDue').value=t?(t.due_at?t.due_at.slice(0,16):''):defaultDueLocal();
+  curDue=t?(t.due_at?t.due_at.slice(0,16):''):defaultDueLocal(); updateDueBtn();
   document.getElementById('fDelete').style.display=id?'block':'none';
   document.getElementById('cmtWrap').style.display=id?'block':'none';
   document.getElementById('cmtList').innerHTML=''; document.getElementById('cmtInput').value='';
@@ -356,8 +382,7 @@ document.getElementById('addBtn').onclick=()=>openTask(null);
 document.getElementById('fCancel').onclick=closeTask;
 document.getElementById('fSave').onclick=async()=>{
   const title=document.getElementById('fTitle').value.trim(); if(!title) return;
-  const due=document.getElementById('fDue').value;
-  const payload={title,category:curCat,priority:curPrio,due_at:due?due+':00':''};
+  const payload={title,category:curCat,priority:curPrio,due_at:curDue?curDue+':00':''};
   try{ if(state.editId) await api('/api/tasks/'+state.editId,{method:'PATCH',body:JSON.stringify(payload)});
        else await api('/api/tasks',{method:'POST',body:JSON.stringify(payload)});
        closeTask(); await load(); }catch(e){}
@@ -365,6 +390,48 @@ document.getElementById('fSave').onclick=async()=>{
 document.getElementById('fDelete').onclick=async()=>{
   if(!state.editId) return;
   try{ await api('/api/tasks/'+state.editId,{method:'DELETE'}); closeTask(); await load(); }catch(e){}
+};
+
+// ---------- iOS-style date/time wheels ----------
+const MON=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+const WD=['вс','пн','вт','ср','чт','пт','сб'];
+const p2=n=>String(n).padStart(2,'0');
+const DUE_DATES=(()=>{ const a=[], base=new Date(); base.setHours(0,0,0,0);
+  for(let i=-30;i<=400;i++){ const d=new Date(base); d.setDate(base.getDate()+i);
+    const val=d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+    const label=i===0?'Сегодня':i===1?'Завтра':WD[d.getDay()]+', '+d.getDate()+' '+MON[d.getMonth()];
+    a.push({val,label}); } return a; })();
+const HOURS=Array.from({length:24},(_,i)=>p2(i));
+const MINS=Array.from({length:60},(_,i)=>p2(i));
+function updateDueBtn(){ const el=document.getElementById('dueBtn');
+  if(!curDue){ el.textContent='Без дедлайна'; el.style.color='var(--muted)'; return; }
+  const d=new Date(curDue); el.style.color='var(--ink)';
+  el.textContent=p2(d.getDate())+'.'+p2(d.getMonth()+1)+'.'+d.getFullYear()+', '+p2(d.getHours())+':'+p2(d.getMinutes()); }
+function wheelIndex(el){ return Math.max(0, Math.round(el.scrollTop/40)); }
+function markWheel(el){ const i=wheelIndex(el); el.querySelectorAll('.wi').forEach((w,j)=>w.classList.toggle('sel',j===i)); }
+function buildWheel(el, items, sel){ el.innerHTML='<div class="pad"></div>'+items.map(t=>'<div class="wi">'+t+'</div>').join('')+'<div class="pad"></div>';
+  el.scrollTop=sel*40; markWheel(el); el.onscroll=()=>{ clearTimeout(el._t); el._t=setTimeout(()=>markWheel(el),70); }; }
+function openDue(){
+  document.getElementById('dueScrim').classList.add('on');
+  setTimeout(()=>{ const base=curDue?new Date(curDue):new Date();
+    const dval=base.getFullYear()+'-'+p2(base.getMonth()+1)+'-'+p2(base.getDate());
+    let di=DUE_DATES.findIndex(x=>x.val===dval); if(di<0) di=30;
+    buildWheel(document.getElementById('wDate'), DUE_DATES.map(x=>x.label), di);
+    buildWheel(document.getElementById('wHour'), HOURS, base.getHours());
+    buildWheel(document.getElementById('wMin'), MINS, base.getMinutes());
+  }, 30);
+}
+function scrollDateTo(off){ const el=document.getElementById('wDate'); el.scrollTop=(30+off)*40; setTimeout(()=>markWheel(el),60); }
+document.getElementById('dueBtn').onclick=openDue;
+document.getElementById('qToday').onclick=()=>scrollDateTo(0);
+document.getElementById('qTomorrow').onclick=()=>scrollDateTo(1);
+document.getElementById('qNone').onclick=()=>{ curDue=''; updateDueBtn(); document.getElementById('dueScrim').classList.remove('on'); };
+document.getElementById('dueCancel').onclick=()=>document.getElementById('dueScrim').classList.remove('on');
+document.getElementById('dueDone').onclick=()=>{
+  const d=DUE_DATES[Math.min(wheelIndex(document.getElementById('wDate')),DUE_DATES.length-1)];
+  const hh=HOURS[Math.min(wheelIndex(document.getElementById('wHour')),23)];
+  const mm=MINS[Math.min(wheelIndex(document.getElementById('wMin')),59)];
+  curDue=d.val+'T'+hh+':'+mm; updateDueBtn(); document.getElementById('dueScrim').classList.remove('on');
 };
 
 let curColor=PALETTE[0];
