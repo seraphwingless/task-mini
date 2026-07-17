@@ -10,13 +10,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from auth import AuthError, verify_init_data
-from sheets import Sheets
+from db import DB
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 OWNER_ID = int(os.environ["OWNER_ID"])
-SHEET_ID = os.environ["SHEET_ID"]
 
-store = Sheets(SHEET_ID)
+store = DB(os.environ["DATABASE_URL"])
 app = FastAPI(title="Spender Tasks Mini App")
 HERE = os.path.dirname(__file__)
 
