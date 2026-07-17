@@ -49,7 +49,7 @@ class DB:
 
     async def pool(self):
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=5)
+            self._pool = await asyncpg.create_pool(self._dsn, ssl=False, min_size=1, max_size=5)
             async with self._pool.acquire() as c:
                 await c.execute(DDL)
                 if not await c.fetchval("SELECT count(*) FROM categories"):
