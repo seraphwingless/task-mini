@@ -158,6 +158,15 @@
     <button class="btn ghost" id="optCancel" style="margin-top:8px">Отмена</button>
   </div></div>
 
+  <div class="scrim" id="accScrim"><div class="panel">
+    <h2>Дать доступ</h2>
+    <div class="fld"><label>Telegram ID</label><input type="text" id="accId" inputmode="numeric" placeholder="123456789"></div>
+    <div class="fld"><label>Имя (для тебя)</label><input type="text" id="accName" placeholder="Ксения"></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">ID человек узнаёт у @userinfobot и присылает тебе.</div>
+    <button class="btn" id="accSave">Добавить</button>
+    <button class="btn ghost" id="accCancel">Отмена</button>
+  </div></div>
+
   <div class="scrim" id="dueScrim"><div class="panel">
     <h2>Дедлайн</h2>
     <div class="row" style="margin-bottom:6px">
@@ -180,7 +189,7 @@ const tg = window.Telegram ? window.Telegram.WebApp : null;
 if (tg) { tg.ready(); tg.expand(); }
 const PCOL = {P1:'#E24B4A',P2:'#D85A30',P3:'#EF9F27',P4:'#378ADD',P5:'#888780'};
 const PALETTE = ['#639922','#378ADD','#1D9E75','#7F77DD','#D85A30','#E24B4A','#EF9F27','#888780'];
-const state = { tab:'calendar', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null, settings:{} };
+const state = { tab:'calendar', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null, settings:{}, me:null };
 function S(k, def){ return (state.settings && state.settings[k]!=null && state.settings[k]!=='') ? state.settings[k] : def; }
 
 function catMeta(name){ const c=state.cats.find(x=>x.name===name); return c||{name,emoji:'',color:'#888780'}; }
@@ -189,7 +198,7 @@ function tint(hex){ return hex+'22'; }
 async function api(path, opts={}) {
   const r = await fetch(path, Object.assign({}, opts, { headers: Object.assign({
     'Content-Type':'application/json', 'X-Telegram-Init-Data': tg?tg.initData:'' }, opts.headers||{}) }));
-  if (r.status===401){ document.getElementById('list').innerHTML='<div class="empty"><div class="big">🔒</div>Доступ только у владельца</div>'; throw new Error('401'); }
+  if (r.status===401||r.status===403){ document.getElementById('list').innerHTML='<div class="empty"><div class="big">🔒</div>Доступ только по приглашению</div>'; throw new Error(''+r.status); }
   if (!r.ok) throw new Error('api '+r.status);
   const txt = await r.text(); return txt?JSON.parse(txt):null;
 }
@@ -318,6 +327,7 @@ function renderSettings(){
     <div class="sgroup"><div class="srow"><span>Часовой пояс</span><span class="val">авто · ${tz}</span></div></div>
     <div class="slabel">Оформление</div>
     <div class="sgroup"><div class="srow" id="sTheme"><span>Тема</span><span class="val">${THEME[S('theme','auto')]||'как в Telegram'} ›</span></div></div>
+    ${state.me&&state.me.is_owner?'<div class="slabel">Доступ (только у тебя)</div><div class="sgroup" id="accGroup"></div>':''}
     <div style="height:24px"></div>`;
   document.getElementById('addCat').onclick=()=>openCat(null);
   document.querySelectorAll('.catrow').forEach(r=>r.onclick=()=>openCat(r.dataset.c));
@@ -328,7 +338,24 @@ function renderSettings(){
     opt('жёсткие (🟢>1д, 🔴<4ч)',{urg_green_h:24,urg_yellow_h:12,urg_orange_h:4})]);
   document.getElementById('sTheme').onclick=()=>openOpts('Тема',Object.keys(THEME).map(v=>opt(THEME[v],{theme:v})));
   document.querySelectorAll('.tg2').forEach(t=>t.onclick=()=>{const k=t.dataset.k; saveSettings({[k]: S(k,'1')==='1'?'0':'1'});});
+  if(state.me&&state.me.is_owner) loadAccess();
 }
+async function loadAccess(){
+  const g=document.getElementById('accGroup'); if(!g) return;
+  try{ const list=await api('/api/access');
+    g.innerHTML=list.map(u=>`<div class="srow"><span>${u.owner?'👑 ':''}${esc(u.name||u.user_id)}<span style="color:#B4B2A9;font-size:12px"> · ${u.user_id}</span></span>${u.owner?'':`<span class="accDel" data-id="${u.user_id}" style="color:#A32D2D">Убрать</span>`}</div>`).join('')
+      + '<div class="srow" id="accAdd" style="color:var(--accent);font-weight:500">+ Дать доступ по ID</div>';
+    document.getElementById('accAdd').onclick=openAccess;
+    g.querySelectorAll('.accDel').forEach(d=>d.onclick=async()=>{ try{ await api('/api/access/'+d.dataset.id,{method:'DELETE'}); loadAccess(); }catch(e){} });
+  }catch(e){}
+}
+function openAccess(){ document.getElementById('accId').value=''; document.getElementById('accName').value=''; document.getElementById('accScrim').classList.add('on'); }
+document.getElementById('accCancel').onclick=()=>document.getElementById('accScrim').classList.remove('on');
+document.getElementById('accSave').onclick=async()=>{
+  const id=document.getElementById('accId').value.trim(), name=document.getElementById('accName').value.trim();
+  if(!id) return;
+  try{ await api('/api/access',{method:'POST',body:JSON.stringify({user_id:id,name})}); document.getElementById('accScrim').classList.remove('on'); loadAccess(); }catch(e){}
+};
 function openOpts(title, options, onPick){
   document.getElementById('optTitle').textContent=title;
   const el=document.getElementById('optList');
@@ -487,10 +514,11 @@ document.getElementById('cDelete').onclick=async()=>{
 
 document.querySelectorAll('nav div').forEach(d=>d.onclick=()=>{state.tab=d.dataset.tab;state.selDay=null;render();});
 
+async function loadMe(){ try{ state.me=await api('/api/me'); }catch(e){ state.me=null; } }
 async function loadCats(){ try{ state.cats=await api('/api/categories'); }catch(e){ state.cats=[]; } }
 async function loadSettings(){ try{ state.settings=await api('/api/settings'); }catch(e){ state.settings={}; } }
 async function load(){ try{ state.tasks=await api('/api/tasks'); render(); }catch(e){} }
-(async()=>{ await loadSettings(); applyTheme(); await loadCats(); await load(); })();
+(async()=>{ await loadMe(); await loadSettings(); applyTheme(); await loadCats(); await load(); })();
 </script>
 </body>
 </html>

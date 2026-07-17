@@ -1,5 +1,6 @@
-"""Mini App backend: owner-only API поверх Google Sheets + отдача фронтенда.
-Каждый запрос к /api/* проверяет подпись Telegram initData и что это владелец."""
+"""Mini App backend: многопользовательский, инвайт-онли.
+Подпись Telegram проверяется у всех; пускаются только разрешённые (allowed_users);
+каждый видит только свои данные. Управление доступом — только у владельца."""
 from __future__ import annotations
 
 import os
@@ -9,22 +10,32 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from auth import AuthError, verify_init_data
+from auth import AuthError, verify_user
 from db import DB
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 OWNER_ID = int(os.environ["OWNER_ID"])
 
-store = DB(os.environ["DATABASE_URL"])
+store = DB(os.environ["DATABASE_URL"], OWNER_ID)
 app = FastAPI(title="Spender Tasks Mini App")
 HERE = os.path.dirname(__file__)
 
 
-async def require_owner(x_init: str | None = Header(None, alias="X-Telegram-Init-Data")):
+async def current_user(x_init: str | None = Header(None, alias="X-Telegram-Init-Data")) -> int:
     try:
-        return verify_init_data(x_init or "", BOT_TOKEN, OWNER_ID)
+        u = verify_user(x_init or "", BOT_TOKEN)
     except AuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    uid = int(u.get("id", 0))
+    if not await store.is_allowed(uid):
+        raise HTTPException(status_code=403, detail="not allowed")
+    return uid
+
+
+async def owner_only(uid: int = Depends(current_user)) -> int:
+    if uid != OWNER_ID:
+        raise HTTPException(status_code=403, detail="owner only")
+    return uid
 
 
 class TaskIn(BaseModel):
@@ -66,99 +77,124 @@ class CommentIn(BaseModel):
     text: str
 
 
-@app.get("/api/health")
-async def health():
-    return {"ok": True}
+class AccessIn(BaseModel):
+    user_id: str
+    name: str = ""
+
+
+@app.get("/api/me")
+async def me(uid: int = Depends(current_user)):
+    return {"user_id": str(uid), "is_owner": uid == OWNER_ID}
 
 
 # ---- tasks ----
 @app.get("/api/tasks")
-async def list_tasks(user=Depends(require_owner)):
-    return [t for t in await store.list_tasks() if t.get("status") != "done"]
+async def list_tasks(uid: int = Depends(current_user)):
+    return [t for t in await store.list_tasks(uid) if t.get("status") != "done"]
 
 
 @app.post("/api/tasks")
-async def create_task(body: TaskIn, user=Depends(require_owner)):
+async def create_task(body: TaskIn, uid: int = Depends(current_user)):
     task = body.model_dump()
     if task.get("due_at"):
         task["remind_at"] = task["due_at"]
-    return await store.add_task(task)
+    return await store.add_task(uid, task)
 
 
 @app.patch("/api/tasks/{task_id}")
-async def update_task(task_id: str, body: TaskPatch, user=Depends(require_owner)):
+async def update_task(task_id: str, body: TaskPatch, uid: int = Depends(current_user)):
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
     if "due_at" in patch:
         patch["remind_at"] = patch["due_at"]
         patch["reminded"] = ""
         patch["last_nagged_at"] = ""
-    updated = await store.update_task(task_id, patch)
+    updated = await store.update_task(uid, task_id, patch)
     if updated is None:
         raise HTTPException(status_code=404, detail="not found")
     return updated
 
 
 @app.post("/api/tasks/{task_id}/done")
-async def complete_task(task_id: str, user=Depends(require_owner)):
-    updated = await store.update_task(task_id, {
-        "status": "done",
-        "completed_at": datetime.now().isoformat(timespec="seconds"),
-    })
+async def complete_task(task_id: str, uid: int = Depends(current_user)):
+    updated = await store.update_task(uid, task_id, {
+        "status": "done", "completed_at": datetime.now().isoformat(timespec="seconds")})
     if updated is None:
         raise HTTPException(status_code=404, detail="not found")
     return updated
 
 
 @app.delete("/api/tasks/{task_id}")
-async def delete_task(task_id: str, user=Depends(require_owner)):
-    await store.delete_task(task_id)
+async def delete_task(task_id: str, uid: int = Depends(current_user)):
+    await store.delete_task(uid, task_id)
     return {"ok": True}
 
 
 # ---- categories ----
 @app.get("/api/categories")
-async def list_cats(user=Depends(require_owner)):
-    return await store.list_cats()
+async def list_cats(uid: int = Depends(current_user)):
+    return await store.list_cats(uid)
 
 
 @app.post("/api/categories")
-async def add_cat(body: CatIn, user=Depends(require_owner)):
-    return await store.add_cat(body.model_dump())
+async def add_cat(body: CatIn, uid: int = Depends(current_user)):
+    return await store.add_cat(uid, body.model_dump())
 
 
 @app.patch("/api/categories/{name}")
-async def update_cat(name: str, body: CatPatch, user=Depends(require_owner)):
+async def update_cat(name: str, body: CatPatch, uid: int = Depends(current_user)):
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
-    await store.update_cat(name, patch)
+    await store.update_cat(uid, name, patch)
     return {"ok": True}
 
 
 @app.delete("/api/categories/{name}")
-async def delete_cat(name: str, user=Depends(require_owner)):
-    await store.delete_cat(name)
+async def delete_cat(name: str, uid: int = Depends(current_user)):
+    await store.delete_cat(uid, name)
     return {"ok": True}
 
 
 # ---- comments ----
 @app.get("/api/tasks/{task_id}/comments")
-async def list_comments(task_id: str, user=Depends(require_owner)):
-    return await store.list_comments(task_id)
+async def list_comments(task_id: str, uid: int = Depends(current_user)):
+    return await store.list_comments(uid, task_id)
 
 
 @app.post("/api/tasks/{task_id}/comments")
-async def add_comment(task_id: str, body: CommentIn, user=Depends(require_owner)):
-    return await store.add_comment(task_id, body.text)
+async def add_comment(task_id: str, body: CommentIn, uid: int = Depends(current_user)):
+    return await store.add_comment(uid, task_id, body.text)
 
 
 # ---- settings ----
 @app.get("/api/settings")
-async def get_settings(user=Depends(require_owner)):
-    return await store.get_settings()
+async def get_settings(uid: int = Depends(current_user)):
+    return await store.get_settings(uid)
 
 
 @app.put("/api/settings")
-async def put_settings(body: dict, user=Depends(require_owner)):
-    return await store.set_settings(body)
+async def put_settings(body: dict, uid: int = Depends(current_user)):
+    return await store.set_settings(uid, body)
+
+
+# ---- access (owner only) ----
+@app.get("/api/access")
+async def list_access(uid: int = Depends(owner_only)):
+    return await store.list_access()
+
+
+@app.post("/api/access")
+async def add_access(body: AccessIn, uid: int = Depends(owner_only)):
+    try:
+        target = int(body.user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad id")
+    await store.add_access(target, body.name)
+    return {"ok": True}
+
+
+@app.delete("/api/access/{target}")
+async def remove_access(target: int, uid: int = Depends(owner_only)):
+    await store.remove_access(target)
+    return {"ok": True}
 
 
 @app.get("/")
