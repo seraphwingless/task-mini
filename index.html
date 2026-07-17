@@ -205,6 +205,7 @@ async function api(path, opts={}) {
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function linkify(s){ return esc(s).replace(/(https?:\/\/[^\s]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>'); }
 function parseDue(s){ if(!s) return null; const d=new Date(s.replace(' ','T')); return isNaN(d)?null:d; }
+function absDue(iso){ const d=new Date(iso.replace(' ','T')); if(isNaN(d)) return ''; const p=n=>String(n).padStart(2,'0'); return p(d.getDate())+'.'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
 function defaultDueLocal(){ const d=new Date(); d.setHours(d.getHours()+1,0,0,0);
   const p=n=>String(n).padStart(2,'0');
   return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes()); }
@@ -227,7 +228,7 @@ function cardHTML(t){
       <div class="ttl">${esc(t.title)}</div>
       <div class="meta">
         ${t.category?`<span class="cat" style="background:${tint(c.color)};color:${c.color}">${c.emoji} ${t.category}</span>`:''}
-        ${t.due_at?`<span class="dl" style="color:${u.over?'#A32D2D':'var(--muted)'}">⏰ ${u.text}</span><span>${u.emoji}</span>`:''}
+        ${t.due_at?`<span class="dl" style="color:${u.over?'#A32D2D':'var(--muted)'}">📅 ${absDue(t.due_at)} · ${u.text}</span><span>${u.emoji}</span>`:''}
       </div>
     </div>
     <div class="cb" data-done="${t.id}"></div>
