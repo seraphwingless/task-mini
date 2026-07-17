@@ -189,7 +189,7 @@ const tg = window.Telegram ? window.Telegram.WebApp : null;
 if (tg) { tg.ready(); tg.expand(); }
 const PCOL = {P1:'#E24B4A',P2:'#D85A30',P3:'#EF9F27',P4:'#378ADD',P5:'#888780'};
 const PALETTE = ['#639922','#378ADD','#1D9E75','#7F77DD','#D85A30','#E24B4A','#EF9F27','#888780'];
-const state = { tab:'calendar', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null, settings:{}, me:null };
+const state = { tab:'calendar', tasks:[], cats:[], cat:'', selDay:null, weekOff:0, editId:null, catEdit:null, settings:{}, me:null, denied:false };
 function S(k, def){ return (state.settings && state.settings[k]!=null && state.settings[k]!=='') ? state.settings[k] : def; }
 
 function catMeta(name){ const c=state.cats.find(x=>x.name===name); return c||{name,emoji:'',color:'#888780'}; }
@@ -198,7 +198,7 @@ function tint(hex){ return hex+'22'; }
 async function api(path, opts={}) {
   const r = await fetch(path, Object.assign({}, opts, { headers: Object.assign({
     'Content-Type':'application/json', 'X-Telegram-Init-Data': tg?tg.initData:'' }, opts.headers||{}) }));
-  if (r.status===401||r.status===403){ document.getElementById('list').innerHTML='<div class="empty"><div class="big">🔒</div>Доступ только по приглашению</div>'; throw new Error(''+r.status); }
+  if (r.status===401||r.status===403){ state.denied=true; lockScreen(); throw new Error(''+r.status); }
   if (!r.ok) throw new Error('api '+r.status);
   const txt = await r.text(); return txt?JSON.parse(txt):null;
 }
@@ -246,7 +246,14 @@ function bind(){
 function byPrio(a,b){ const o=x=>{const d=parseDue(x.due_at);return d&&d<new Date()?0:1;}; return o(a)-o(b)||(a.priority||'P3').localeCompare(b.priority||'P3'); }
 function visible(){ let t=state.tasks.slice(); if(state.cat) t=t.filter(x=>x.category===state.cat); return t; }
 
+function lockScreen(){
+  const l=document.getElementById('list'); if(l) l.innerHTML='<div class="empty"><div class="big">🔒</div>Доступ только по приглашению</div>';
+  ['addBtn','weekbar','week','filters'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display='none'; });
+  const ti=document.getElementById('title'); if(ti) ti.textContent='Задачи';
+  const su=document.getElementById('sub'); if(su) su.textContent='';
+}
 function render(){
+  if(state.denied){ lockScreen(); return; }
   document.querySelectorAll('nav div').forEach(d=>d.classList.toggle('on',d.dataset.tab===state.tab));
   const isSet=state.tab==='settings', isCal=state.tab==='calendar';
   document.getElementById('addBtn').style.display=isSet?'none':'flex';
