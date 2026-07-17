@@ -12,7 +12,7 @@ TASK_FIELDS = [
     "id", "title", "notes", "category", "priority",
     "due_at", "remind_at", "recurrence", "status",
     "created_at", "completed_at", "attachments",
-    "reminded", "last_nagged_at",
+    "reminded", "last_nagged_at", "reminders", "nag_on",
 ]
 
 DEFAULT_CATS = [
@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS tasks(
   category text DEFAULT '', priority text DEFAULT 'P3', due_at text DEFAULT '',
   remind_at text DEFAULT '', recurrence text DEFAULT 'none', status text DEFAULT 'open',
   created_at text DEFAULT '', completed_at text DEFAULT '', attachments text DEFAULT '',
-  reminded text DEFAULT '', last_nagged_at text DEFAULT '');
+  reminded text DEFAULT '', last_nagged_at text DEFAULT '',
+  reminders text DEFAULT '', nag_on text DEFAULT '1');
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminders text DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS nag_on text DEFAULT '1';
 CREATE TABLE IF NOT EXISTS categories(
   seq bigserial, name text PRIMARY KEY, emoji text DEFAULT '', color text DEFAULT '#888780');
 CREATE TABLE IF NOT EXISTS comments(
@@ -76,6 +79,7 @@ class DB:
         task.setdefault("id", "t" + uuid.uuid4().hex[:7])
         task.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
         task.setdefault("status", "open")
+        task.setdefault("nag_on", "1")
         ph = ",".join("$" + str(i + 1) for i in range(len(TASK_FIELDS)))
         await p.execute(f"INSERT INTO tasks({','.join(TASK_FIELDS)}) VALUES({ph})",
                         *[str(task.get(k, "")) for k in TASK_FIELDS])

@@ -130,6 +130,10 @@
     <div class="fld"><label>Категория</label><div class="row" id="fCat"></div></div>
     <div class="fld"><label>Приоритет</label><div class="row" id="fPrio"></div></div>
     <div class="fld"><label>Дедлайн</label><div id="dueBtn" class="duefield">Сегодня</div></div>
+    <div class="fld"><label>Напоминания</label><div class="row" id="remChips"></div></div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+      <span style="font-size:15px">Пинать при просрочке</span><span id="nagTg"></span>
+    </div>
     <div id="cmtWrap" style="display:none">
       <div class="fld" style="margin-bottom:6px"><label>Комментарии</label></div>
       <div id="cmtList"></div>
@@ -309,8 +313,7 @@ function renderSettings(){
     </div>
     <div class="slabel">Напоминания</div>
     <div class="sgroup">
-      <div class="srow" id="sNag"><span>Пинать при просрочке</span><span class="val">${NAG[S('nag_interval_min','60')]||'раз в час'} ›</span></div>
-      <div class="srow" id="sLead"><span>Напоминать заранее</span><span class="val">${LEAD[S('lead_time_min','60')]||'за 1 час'} ›</span></div>
+      <div class="srow" id="sNag"><span>Частота пинков при просрочке</span><span class="val">${NAG[S('nag_interval_min','60')]||'раз в час'} ›</span></div>
       <div class="srow"><span>Тихие часы (${S('quiet_start','23:00')}–${S('quiet_end','08:00')})</span><span class="tg2" data-k="quiet_on">${tgHTML(S('quiet_on','1')==='1')}</span></div>
       <div class="srow"><span>Утренний дайджест (${S('digest_time','08:00')})</span><span class="tg2" data-k="digest_on">${tgHTML(S('digest_on','1')==='1')}</span></div>
     </div>
@@ -326,18 +329,38 @@ function renderSettings(){
     opt('мягкие (🟢>3д, 🔴<1д)',{urg_green_h:72,urg_yellow_h:48,urg_orange_h:24}),
     opt('стандарт (🟢>2д, 🔴<12ч)',{urg_green_h:48,urg_yellow_h:24,urg_orange_h:12}),
     opt('жёсткие (🟢>1д, 🔴<4ч)',{urg_green_h:24,urg_yellow_h:12,urg_orange_h:4})]);
-  document.getElementById('sNag').onclick=()=>openOpts('Пинать при просрочке',Object.keys(NAG).map(v=>opt(NAG[v],{nag_interval_min:v})));
-  document.getElementById('sLead').onclick=()=>openOpts('Напоминать заранее',Object.keys(LEAD).map(v=>opt(LEAD[v],{lead_time_min:v})));
+  document.getElementById('sNag').onclick=()=>openOpts('Частота пинков при просрочке',Object.keys(NAG).map(v=>opt(NAG[v],{nag_interval_min:v})));
   document.getElementById('sTheme').onclick=()=>openOpts('Тема',Object.keys(THEME).map(v=>opt(THEME[v],{theme:v})));
   document.querySelectorAll('.tg2').forEach(t=>t.onclick=()=>{const k=t.dataset.k; saveSettings({[k]: S(k,'1')==='1'?'0':'1'});});
 }
-function openOpts(title, options){
+function openOpts(title, options, onPick){
   document.getElementById('optTitle').textContent=title;
   const el=document.getElementById('optList');
-  el.innerHTML=options.map((o,i)=>`<div class="srow optrow" data-i="${i}" style="border-bottom:1px solid #F0EEE7"><span>${o.label}</span></div>`).join('');
-  el.querySelectorAll('.optrow').forEach(r=>r.onclick=()=>{ saveSettings(options[+r.dataset.i].patch); document.getElementById('optScrim').classList.remove('on'); });
+  el.innerHTML=options.map((o,i)=>`<div class="srow optrow" data-i="${i}" style="border-bottom:1px solid #F0EEE7"><span>${o.label}</span></div>`).join('') || '<div style="color:#B4B2A9;font-size:13px;padding:8px 2px">Больше вариантов нет.</div>';
+  el.querySelectorAll('.optrow').forEach(r=>r.onclick=()=>{
+    const o=options[+r.dataset.i];
+    document.getElementById('optScrim').classList.remove('on');
+    if(onPick) onPick(o.value); else saveSettings(o.patch);
+  });
   document.getElementById('optScrim').classList.add('on');
 }
+
+const LEADLBL={0:"в момент срока",10:"за 10 мин",30:"за 30 мин",60:"за 1 час",180:"за 3 часа",1440:"за 1 день",2880:"за 2 дня"};
+let curReminders=[], curNag="1";
+function leadLabel(m){ return LEADLBL[m]||("за "+m+" мин"); }
+function renderRemChips(){
+  const el=document.getElementById('remChips');
+  let h=curReminders.slice().sort((a,b)=>b-a).map(m=>`<span class="chip on" data-m="${m}">${leadLabel(m)} ✕</span>`).join('');
+  if(curReminders.length<5) h+=`<span class="chip" id="remAdd">+ добавить</span>`;
+  el.innerHTML=h;
+  el.querySelectorAll('.chip[data-m]').forEach(c=>c.onclick=()=>{ curReminders=curReminders.filter(x=>x!=+c.dataset.m); renderRemChips(); });
+  const add=document.getElementById('remAdd');
+  if(add) add.onclick=()=>openOpts('Добавить напоминание',
+    [0,10,30,60,180,1440,2880].filter(m=>!curReminders.includes(m)).map(m=>({label:leadLabel(m),value:m})),
+    v=>{ if(curReminders.length<5){ curReminders.push(+v); renderRemChips(); } });
+}
+function renderNag(){ document.getElementById('nagTg').innerHTML=tgHTML(curNag==="1"); }
+document.getElementById('nagTg').onclick=()=>{ curNag=(curNag==="1"?"0":"1"); renderNag(); };
 async function saveSettings(patch){
   try{ state.settings=await api('/api/settings',{method:'PUT',body:JSON.stringify(patch)}); applyTheme(); if(state.tab==='settings') renderSettings(); }catch(e){}
 }
@@ -362,6 +385,8 @@ async function openTask(id){
   chipRow(document.getElementById('fCat'), state.cats.map(c=>c.name), n=>`${catMeta(n).emoji} ${n}`, curCat, v=>curCat=v);
   chipRow(document.getElementById('fPrio'), ['P1','P2','P3','P4','P5'], x=>x, curPrio, v=>curPrio=v);
   curDue=t?(t.due_at?t.due_at.slice(0,16):''):defaultDueLocal(); updateDueBtn();
+  try{ curReminders = t ? (t.reminders?JSON.parse(t.reminders):[]) : [0]; }catch(e){ curReminders=[0]; }
+  curNag = t?(t.nag_on||'1'):'1'; renderRemChips(); renderNag();
   document.getElementById('fDelete').style.display=id?'block':'none';
   document.getElementById('cmtWrap').style.display=id?'block':'none';
   document.getElementById('cmtList').innerHTML=''; document.getElementById('cmtInput').value='';
@@ -382,7 +407,8 @@ document.getElementById('addBtn').onclick=()=>openTask(null);
 document.getElementById('fCancel').onclick=closeTask;
 document.getElementById('fSave').onclick=async()=>{
   const title=document.getElementById('fTitle').value.trim(); if(!title) return;
-  const payload={title,category:curCat,priority:curPrio,due_at:curDue?curDue+':00':''};
+  const payload={title,category:curCat,priority:curPrio,due_at:curDue?curDue+':00':'',
+                 reminders:JSON.stringify(curReminders), nag_on:curNag};
   try{ if(state.editId) await api('/api/tasks/'+state.editId,{method:'PATCH',body:JSON.stringify(payload)});
        else await api('/api/tasks',{method:'POST',body:JSON.stringify(payload)});
        closeTask(); await load(); }catch(e){}

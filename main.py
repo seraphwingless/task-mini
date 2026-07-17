@@ -34,6 +34,8 @@ class TaskIn(BaseModel):
     due_at: str = ""
     recurrence: str = "none"
     notes: str = ""
+    reminders: str = ""
+    nag_on: str = "1"
 
 
 class TaskPatch(BaseModel):
@@ -44,6 +46,8 @@ class TaskPatch(BaseModel):
     recurrence: str | None = None
     notes: str | None = None
     status: str | None = None
+    reminders: str | None = None
+    nag_on: str | None = None
 
 
 class CatIn(BaseModel):
