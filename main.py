@@ -21,6 +21,15 @@ app = FastAPI(title="Spender Tasks Mini App")
 HERE = os.path.dirname(__file__)
 
 
+@app.on_event("startup")
+async def warmup():
+    """Пул и DDL прогреваем на старте, чтобы первый заход пользователя не ждал."""
+    try:
+        await store.pool()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def current_user(x_init: str | None = Header(None, alias="X-Telegram-Init-Data")) -> int:
     try:
         u = verify_user(x_init or "", BOT_TOKEN)
@@ -47,6 +56,7 @@ class TaskIn(BaseModel):
     notes: str = ""
     reminders: str = ""
     nag_on: str = "1"
+    checklist: str = "0"
 
 
 class TaskPatch(BaseModel):
@@ -59,6 +69,8 @@ class TaskPatch(BaseModel):
     status: str | None = None
     reminders: str | None = None
     nag_on: str | None = None
+    checklist: str | None = None
+    checked_date: str | None = None
 
 
 class CatIn(BaseModel):
@@ -87,10 +99,26 @@ async def me(uid: int = Depends(current_user)):
     return {"user_id": str(uid), "is_owner": uid == OWNER_ID}
 
 
+@app.get("/api/bootstrap")
+async def bootstrap(uid: int = Depends(current_user)):
+    """Всё для первого экрана одним запросом — вместо четырёх."""
+    return {
+        "me": {"user_id": str(uid), "is_owner": uid == OWNER_ID},
+        "settings": await store.get_settings(uid),
+        "cats": await store.list_cats(uid),
+        "tasks": await store.list_tasks(uid),
+    }
+
+
 # ---- tasks ----
 @app.get("/api/tasks")
 async def list_tasks(uid: int = Depends(current_user)):
-    return [t for t in await store.list_tasks(uid) if t.get("status") != "done"]
+    return await store.list_tasks(uid)
+
+
+@app.get("/api/archive")
+async def list_archive(uid: int = Depends(current_user)):
+    return await store.list_archive(uid)
 
 
 @app.post("/api/tasks")
@@ -199,4 +227,5 @@ async def remove_access(target: int, uid: int = Depends(owner_only)):
 
 @app.get("/")
 async def index():
-    return FileResponse(os.path.join(HERE, "index.html"))
+    return FileResponse(os.path.join(HERE, "index.html"),
+                        headers={"Cache-Control": "no-cache"})

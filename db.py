@@ -13,19 +13,27 @@ TASK_FIELDS = [
     "due_at", "remind_at", "recurrence", "status",
     "created_at", "completed_at", "attachments",
     "reminded", "last_nagged_at", "reminders", "nag_on",
+    "checklist", "checked_date",
 ]
 
 DEFAULT_CATS = [
-    {"name": "личное", "emoji": "🙋‍♂️", "color": "#639922"},
-    {"name": "бизнес", "emoji": "💼", "color": "#378ADD"},
-    {"name": "спорт", "emoji": "⚽", "color": "#1D9E75"},
-    {"name": "семья", "emoji": "👨‍👩‍👧", "color": "#7F77DD"},
+    {"name": "Личное", "emoji": "🙋‍♂️", "color": "#639922"},
+    {"name": "Бизнес", "emoji": "💼", "color": "#378ADD"},
+    {"name": "Спорт", "emoji": "⚽", "color": "#1D9E75"},
+    {"name": "Семья", "emoji": "👨‍👩‍👧", "color": "#7F77DD"},
 ]
 DEFAULT_SETTINGS = {
     "default_priority": "P3", "urg_green_h": "48", "urg_yellow_h": "24", "urg_orange_h": "12",
     "quiet_on": "1", "quiet_start": "23:00", "quiet_end": "08:00",
     "digest_on": "1", "digest_time": "08:00", "theme": "auto",
 }
+
+
+def cap(name: str) -> str:
+    """Категории всегда с большой буквы (остальной регистр не трогаем)."""
+    n = (name or "").strip()
+    return n[:1].upper() + n[1:] if n else n
+
 
 DDL = """
 CREATE TABLE IF NOT EXISTS tasks(
@@ -38,6 +46,9 @@ CREATE TABLE IF NOT EXISTS tasks(
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminders text DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS nag_on text DEFAULT '1';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS user_id bigint;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS checklist text DEFAULT '0';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS checked_date text DEFAULT '';
+CREATE INDEX IF NOT EXISTS tasks_user_status_idx ON tasks(user_id, status);
 CREATE TABLE IF NOT EXISTS comments(id text PRIMARY KEY, task_id text, body text, created_at text);
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS user_id bigint;
 CREATE TABLE IF NOT EXISTS user_categories(
@@ -45,6 +56,14 @@ CREATE TABLE IF NOT EXISTS user_categories(
   PRIMARY KEY(user_id, name));
 CREATE TABLE IF NOT EXISTS user_settings(user_id bigint, key text, value text, PRIMARY KEY(user_id, key));
 CREATE TABLE IF NOT EXISTS allowed_users(user_id bigint PRIMARY KEY, name text DEFAULT '', added_at text DEFAULT '');
+DO $$ BEGIN
+  BEGIN
+    UPDATE user_categories SET name = initcap(name) WHERE name <> initcap(name);
+  EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+  UPDATE tasks SET category = initcap(category)
+   WHERE category IS NOT NULL AND category <> '' AND category <> initcap(category);
+END $$;
 """
 
 
@@ -56,7 +75,7 @@ class DB:
 
     async def pool(self):
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn, ssl=False, min_size=1, max_size=5)
+            self._pool = await asyncpg.create_pool(self._dsn, ssl=False, min_size=2, max_size=5)
             async with self._pool.acquire() as c:
                 await c.execute(DDL)
                 await c.execute("UPDATE tasks SET user_id=$1 WHERE user_id IS NULL", self._owner)
@@ -95,7 +114,13 @@ class DB:
     # ---- tasks ----
     async def list_tasks(self, uid: int):
         p = await self.pool()
-        rows = await p.fetch("SELECT * FROM tasks WHERE user_id=$1 ORDER BY seq", int(uid))
+        rows = await p.fetch("SELECT * FROM tasks WHERE user_id=$1 AND status<>'done' ORDER BY seq", int(uid))
+        return [self._task(r) for r in rows]
+
+    async def list_archive(self, uid: int):
+        p = await self.pool()
+        rows = await p.fetch("SELECT * FROM tasks WHERE user_id=$1 AND status='done' "
+                             "ORDER BY completed_at DESC NULLS LAST, seq DESC", int(uid))
         return [self._task(r) for r in rows]
 
     async def add_task(self, uid: int, task: dict):
@@ -104,6 +129,7 @@ class DB:
         task.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
         task.setdefault("status", "open")
         task.setdefault("nag_on", "1")
+        task["category"] = cap(task.get("category", ""))
         cols = TASK_FIELDS + ["user_id"]
         vals = [str(task.get(k, "")) for k in TASK_FIELDS] + [int(uid)]
         ph = ",".join("$" + str(i + 1) for i in range(len(cols)))
@@ -112,6 +138,8 @@ class DB:
 
     async def update_task(self, uid: int, task_id: str, patch: dict):
         p = await self.pool()
+        if "category" in patch:
+            patch["category"] = cap(patch["category"])
         fields = [k for k in patch if k in TASK_FIELDS and k != "id"]
         if not fields:
             r = await p.fetchrow("SELECT * FROM tasks WHERE id=$1 AND user_id=$2", task_id, int(uid))
@@ -138,14 +166,15 @@ class DB:
 
     async def add_cat(self, uid: int, c: dict):
         p = await self.pool()
+        c["name"] = cap(c.get("name", ""))
         await p.execute("INSERT INTO user_categories(user_id,name,emoji,color) VALUES($1,$2,$3,$4) "
                         "ON CONFLICT(user_id,name) DO UPDATE SET emoji=$3,color=$4",
-                        int(uid), c.get("name", ""), c.get("emoji", ""), c.get("color", "#888780"))
+                        int(uid), c["name"], c.get("emoji", ""), c.get("color", "#888780"))
         return c
 
     async def update_cat(self, uid: int, name: str, patch: dict):
         p = await self.pool()
-        new_name = (str(patch.get("name") or name)).strip() or name
+        new_name = cap(str(patch.get("name") or name)) or name
         await p.execute("UPDATE user_categories SET emoji=COALESCE($3,emoji), color=COALESCE($4,color), "
                         "name=$5 WHERE user_id=$1 AND name=$2",
                         int(uid), name, patch.get("emoji"), patch.get("color"), new_name)
