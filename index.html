@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Задачи</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
@@ -55,11 +55,13 @@
   .ghead{ display:flex; align-items:center; gap:6px; font-size:13px; color:#6B6963; font-weight:600; margin:12px 4px 8px; }
   .empty{ text-align:center; color:#B7B5AC; padding:64px 20px; }
   .empty .big{ font-size:40px; margin-bottom:10px; }
-  nav{ display:grid; grid-template-columns:repeat(4,1fr); background:#fff; border-top:1px solid var(--line);
-       text-align:center; font-size:10.5px; padding:7px 0 max(9px, env(safe-area-inset-bottom)); }
-  nav div{ color:#B4B2A9; padding:2px 0; }
-  nav div.on{ color:var(--accent); }
-  nav .ic{ font-size:21px; display:block; margin-bottom:1px; }
+  nav{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; background:#fff; border-top:1px solid var(--line);
+       text-align:center; font-size:11px; padding:8px 10px calc(env(safe-area-inset-bottom) + 12px); flex:none; }
+  nav div{ color:#9C9A92; padding:7px 2px 6px; border-radius:14px; transition:.15s; font-weight:500; }
+  nav div:active{ transform:scale(.94); }
+  nav div.on{ color:var(--accent); background:rgba(24,95,165,.10); }
+  nav .ic{ font-size:20px; display:block; margin-bottom:3px; line-height:1; }
+  html[data-theme="dark"] nav div.on{ background:rgba(90,160,235,.16); color:#7FB4EC; }
   .scrim{ position:fixed; inset:0; background:rgba(15,15,15,.4); display:none; align-items:flex-end; z-index:20; }
   .scrim.on{ display:flex; }
   .panel{ background:#fff; width:100%; border-radius:20px 20px 0 0; padding:18px 18px max(18px, env(safe-area-inset-bottom));
@@ -128,7 +130,7 @@
   <main><div id="list"></div></main>
 
   <nav id="nav">
-    <div data-tab="calendar" class="on"><span class="ic">🗓</span>Календарь</div>
+    <div data-tab="calendar" class="on"><span class="ic">🗓</span>Задачи</div>
     <div data-tab="checklist"><span class="ic">✅</span>Чеклист</div>
     <div data-tab="all"><span class="ic">📋</span>Все</div>
     <div data-tab="settings"><span class="ic">⚙️</span>Настройки</div>
@@ -137,17 +139,17 @@
   <div class="scrim" id="taskScrim"><div class="panel">
     <h2 id="tsTitle">Новая задача</h2>
     <div class="fld"><label>Название</label><input type="text" id="fTitle" placeholder="Купить кофе"></div>
-    <div class="fld"><label>Тип</label><div id="fChkBtn" class="duefield">Обычная задача</div></div>
-    <div class="fld"><label>Категория</label><div class="row" id="fCat"></div></div>
-    <div class="fld"><label>Приоритет</label><div class="row" id="fPrio"></div></div>
-    <div class="fld taskonly"><label>Дедлайн</label><div id="dueBtn" class="duefield">Сегодня</div></div>
-    <div class="fld taskonly"><label>Напоминания</label><div class="row" id="remChips"></div></div>
-    <div class="fld taskonly"><label>Пинать при просрочке</label><div id="nagBtn" class="duefield">выключено</div></div>
     <div id="cmtWrap" style="display:none">
       <div class="fld" style="margin-bottom:6px"><label>Комментарии</label></div>
       <div id="cmtList"></div>
-      <div class="cmtbar"><textarea id="cmtInput" rows="2" placeholder="Написать комментарий… (можно несколько строк)"></textarea><button class="btn" id="cmtAdd">→</button></div>
+      <div class="cmtbar" style="margin-bottom:14px"><textarea id="cmtInput" rows="2" placeholder="Написать комментарий… (можно несколько строк)"></textarea><button class="btn" id="cmtAdd">→</button></div>
     </div>
+    <div class="fld"><label>Категория</label><div class="row" id="fCat"></div></div>
+    <div class="fld"><label>Приоритет</label><div class="row" id="fPrio"></div></div>
+    <div class="fld"><label>Тип</label><div id="fChkBtn" class="duefield">Обычная задача</div></div>
+    <div class="fld taskonly"><label>Дедлайн</label><div id="dueBtn" class="duefield">Сегодня</div></div>
+    <div class="fld taskonly"><label>Напоминания</label><div class="row" id="remChips"></div></div>
+    <div class="fld taskonly"><label>Пинать при просрочке</label><div id="nagBtn" class="duefield">выключено</div></div>
     <button class="btn" id="fSave" style="margin-top:14px">Сохранить</button>
     <button class="btn ghost" id="fFinish" style="display:none">Закончить (убрать из чеклиста)</button>
     <button class="btn danger" id="fDelete" style="display:none">Удалить задачу</button>
@@ -385,6 +387,24 @@ function renderWeek(){
 document.getElementById('wPrev').onclick=()=>{state.weekOff--;render();};
 document.getElementById('wNext').onclick=()=>{state.weekOff++;render();};
 
+// Листание недель свайпом (и по самой неделе, и по строке с датами)
+(function(){
+  let x0=null, y0=null;
+  const zone=[document.getElementById('week'), document.getElementById('weekbar')];
+  zone.forEach(el=>{
+    el.addEventListener('touchstart',e=>{ x0=e.touches[0].clientX; y0=e.touches[0].clientY; },{passive:true});
+    el.addEventListener('touchend',e=>{
+      if(x0===null) return;
+      const t=e.changedTouches[0], dx=t.clientX-x0, dy=t.clientY-y0;
+      x0=null;
+      if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.5){
+        state.weekOff += (dx<0 ? 1 : -1);
+        render();
+      }
+    },{passive:true});
+  });
+})();
+
 function tgHTML(on){ return `<span class="tg" style="background:${on?'#1D9E75':'#D3D1C7'}"><i style="left:${on?'19px':'2.5px'}"></i></span>`; }
 const THEME={"auto":"как в Telegram","light":"светлая","dark":"тёмная"};
 function urgLabel(){ const g=+S('urg_green_h',48); return g>=72?'мягкие':(g<=24?'жёсткие':'стандарт'); }
@@ -523,24 +543,32 @@ document.getElementById('cmtAdd').onclick=async()=>{
 };
 document.getElementById('addBtn').onclick=()=>openTask(null);
 document.getElementById('fCancel').onclick=closeTask;
-document.getElementById('fSave').onclick=async()=>{
+// Защита от двойного тапа: пока запрос в полёте, кнопка заблокирована.
+let busy=false;
+async function once(btn, label, fn){
+  if(busy) return;
+  busy=true; const old=btn.textContent; btn.disabled=true; btn.style.opacity='.6'; btn.textContent=label;
+  try{ await fn(); }catch(e){}
+  finally{ busy=false; btn.disabled=false; btn.style.opacity=''; btn.textContent=old; }
+}
+document.getElementById('fSave').onclick=e=>once(e.currentTarget,'Сохраняю…',async()=>{
   const title=document.getElementById('fTitle').value.trim(); if(!title) return;
   const cl=curChecklist==='1';
   const payload={title,category:capName(curCat),priority:curPrio,checklist:curChecklist,
                  due_at:cl?'':(curDue?curDue+':00':''),
                  reminders:cl?'[]':JSON.stringify(curReminders), nag_on:cl?'0':curNag};
-  try{ if(state.editId) await api('/api/tasks/'+state.editId,{method:'PATCH',body:JSON.stringify(payload)});
-       else await api('/api/tasks',{method:'POST',body:JSON.stringify(payload)});
-       closeTask(); await load(); }catch(e){}
-};
-document.getElementById('fFinish').onclick=async()=>{
+  if(state.editId) await api('/api/tasks/'+state.editId,{method:'PATCH',body:JSON.stringify(payload)});
+  else await api('/api/tasks',{method:'POST',body:JSON.stringify(payload)});
+  closeTask(); await load();
+});
+document.getElementById('fFinish').onclick=e=>once(e.currentTarget,'Убираю…',async()=>{
   if(!state.editId) return;
-  try{ await api('/api/tasks/'+state.editId+'/done',{method:'POST'}); closeTask(); await load(); }catch(e){}
-};
-document.getElementById('fDelete').onclick=async()=>{
+  await api('/api/tasks/'+state.editId+'/done',{method:'POST'}); closeTask(); await load();
+});
+document.getElementById('fDelete').onclick=e=>once(e.currentTarget,'Удаляю…',async()=>{
   if(!state.editId) return;
-  try{ await api('/api/tasks/'+state.editId,{method:'DELETE'}); closeTask(); await load(); }catch(e){}
-};
+  await api('/api/tasks/'+state.editId,{method:'DELETE'}); closeTask(); await load();
+});
 
 // ---------- iOS-style date/time wheels ----------
 const MON=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
