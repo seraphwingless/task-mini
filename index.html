@@ -20,8 +20,12 @@
   .weekbar{ display:flex; align-items:center; justify-content:space-between; padding:2px 18px 6px; }
   .weekbar .rng{ font-size:13px; font-weight:500; }
   .weekbar button{ background:none; border:none; color:#B4B2A9; font-size:20px; padding:2px 8px; }
-  .week{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; text-align:center; padding:0 12px 8px; }
-  .week .wd{ font-size:11px; color:#B7B5AC; }
+  .weekscroll{ display:flex; overflow-x:auto; scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch;
+               scrollbar-width:none; overscroll-behavior-x:contain; }
+  .weekscroll::-webkit-scrollbar{ display:none; }
+  .weekpage{ flex:0 0 100%; display:grid; grid-template-columns:repeat(7,1fr); gap:4px;
+             text-align:center; padding:0 12px 8px; scroll-snap-align:center; }
+  .weekpage .wd{ font-size:11px; color:#B7B5AC; }
   .day{ padding:7px 0 5px; border-radius:11px; font-size:15px; margin-top:3px; transition:.12s; }
   .day.sel{ background:var(--accent); color:#fff; font-weight:600; }
   .dot{ width:5px; height:5px; border-radius:50%; margin:3px auto 0; }
@@ -124,7 +128,7 @@
   <div class="weekbar" id="weekbar" style="display:none">
     <button id="wPrev">‹</button><span class="rng" id="wRange"></span><button id="wNext">›</button>
   </div>
-  <div class="week" id="week" style="display:none"></div>
+  <div class="weekscroll" id="weekScroll" style="display:none"></div>
   <div class="filters" id="filters"></div>
 
   <main><div id="list"></div></main>
@@ -226,6 +230,13 @@ function skeleton(){
 }
 
 function catMeta(name){ const c=state.cats.find(x=>x.name===name); return c||{name,emoji:'',color:'#888780'}; }
+// Панель всегда открывается с начала, а не там, где её оставили в прошлый раз.
+function showScrim(id){
+  const s=document.getElementById(id), p=s.querySelector('.panel');
+  if(p) p.scrollTop=0;
+  s.classList.add('on');
+  if(p) requestAnimationFrame(()=>{ p.scrollTop=0; });
+}
 
 async function api(path, opts={}) {
   const r = await fetch(path, Object.assign({}, opts, { headers: Object.assign({
@@ -307,7 +318,7 @@ function visible(){ let t=state.tasks.slice(); if(state.cat) t=t.filter(x=>x.cat
 
 function lockScreen(){
   const l=document.getElementById('list'); if(l) l.innerHTML='<div class="empty"><div class="big">🔒</div>Доступ только по приглашению</div>';
-  ['addBtn','weekbar','week','filters'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display='none'; });
+  ['addBtn','weekbar','weekScroll','filters'].forEach(id=>{ const e=document.getElementById(id); if(e) e.style.display='none'; });
   const ti=document.getElementById('title'); if(ti) ti.textContent='Задачи';
   const su=document.getElementById('sub'); if(su) su.textContent='';
 }
@@ -317,7 +328,7 @@ function render(){
   const isSet=state.tab==='settings', isCal=state.tab==='calendar', isCL=state.tab==='checklist';
   document.getElementById('addBtn').style.display=isSet?'none':'flex';
   document.getElementById('weekbar').style.display=isCal?'flex':'none';
-  document.getElementById('week').style.display=isCal?'grid':'none';
+  document.getElementById('weekScroll').style.display=isCal?'flex':'none';
   document.getElementById('filters').style.display=(isSet||isCL)?'none':'flex';
   if(!isSet && !isCL) renderFilters();
   if(isSet){ renderSettings(); return; }
@@ -334,10 +345,8 @@ function render(){
   }
 
   let items=visible().filter(t=>t.checklist!=='1');
-  if(isCal){ title.textContent='Календарь'; sub.textContent=''; renderWeek();
-    const sel=state.selDay||now; items=items.filter(t=>{const d=parseDue(t.due_at);return d&&d.toDateString()===sel.toDateString();});
-    if(!items.length){ list.innerHTML='<div class="empty"><div class="big">🗒️</div>Задач нет</div>'; return; }
-    items.sort(byPrio); list.innerHTML=items.map(cardHTML).join(''); bind(); return;
+  if(isCal){ title.textContent='Задачи'; sub.textContent='';
+    weekLabel(); renderWeekPages(); renderCalList(); return;
   }
 
   // ---- Все / Архив ----
@@ -369,40 +378,78 @@ function renderFilters(){
   f.innerHTML=h;
   f.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{state.cat=ch.dataset.c;render();});
 }
-function renderWeek(){
-  const base=new Date(); base.setHours(0,0,0,0); base.setDate(base.getDate()+state.weekOff*7);
-  const mon=new Date(base); mon.setDate(base.getDate()-((base.getDay()+6)%7));
-  const end=new Date(mon); end.setDate(mon.getDate()+6);
+// ---------- лента недель: настоящий горизонтальный скролл ----------
+const WMIN=-26, WMAX=52;
+function mondayFor(off){
+  const b=new Date(); b.setHours(0,0,0,0); b.setDate(b.getDate()+off*7);
+  const m=new Date(b); m.setDate(b.getDate()-((b.getDay()+6)%7)); return m;
+}
+function weekLabel(){
+  const mon=mondayFor(state.weekOff), end=new Date(mon); end.setDate(mon.getDate()+6);
   document.getElementById('wRange').textContent=mon.getDate()+'–'+end.getDate()+' '+end.toLocaleDateString('ru-RU',{month:'long'});
+}
+function dayHasTasks(d){ return state.tasks.some(t=>{const td=parseDue(t.due_at);return td&&td.toDateString()===d.toDateString();}); }
+function renderWeekPages(){
+  const sc=document.getElementById('weekScroll');
   const names=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'], sel=state.selDay||new Date(), today=new Date();
   let h='';
-  for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(mon.getDate()+i);
-    const has=state.tasks.some(t=>{const td=parseDue(t.due_at);return td&&td.toDateString()===d.toDateString();});
-    const isSel=d.toDateString()===sel.toDateString(), isToday=d.toDateString()===today.toDateString();
-    h+=`<div><div class="wd">${names[i]}</div><div class="day ${isSel?'sel':''}" data-day="${d.toISOString()}" style="${isToday&&!isSel?'color:var(--accent)':''}">${d.getDate()}<div class="dot" style="background:${has?(isSel?'#fff':'#378ADD'):'transparent'}"></div></div></div>`;
+  for(let off=WMIN; off<=WMAX; off++){
+    const mon=mondayFor(off); h+='<div class="weekpage">';
+    for(let i=0;i<7;i++){ const d=new Date(mon); d.setDate(mon.getDate()+i);
+      const has=dayHasTasks(d);
+      const isSel=d.toDateString()===sel.toDateString(), isToday=d.toDateString()===today.toDateString();
+      h+=`<div><div class="wd">${names[i]}</div><div class="day ${isSel?'sel':''}" data-day="${d.toISOString()}" style="${isToday&&!isSel?'color:var(--accent)':''}">${d.getDate()}<div class="dot" style="background:${has?(isSel?'#fff':'#378ADD'):'transparent'}"></div></div></div>`;
+    }
+    h+='</div>';
   }
-  const w=document.getElementById('week'); w.innerHTML=h;
-  w.querySelectorAll('.day').forEach(el=>el.onclick=()=>{state.selDay=new Date(el.dataset.day);render();});
+  sc.innerHTML=h;
+  sc.querySelectorAll('.day').forEach(el=>el.onclick=()=>{ state.selDay=new Date(el.dataset.day); markSelDay(); renderCalList(); });
+  scrollToWeek(state.weekOff,false);
 }
-document.getElementById('wPrev').onclick=()=>{state.weekOff--;render();};
-document.getElementById('wNext').onclick=()=>{state.weekOff++;render();};
-
-// Листание недель свайпом (и по самой неделе, и по строке с датами)
-(function(){
-  let x0=null, y0=null;
-  const zone=[document.getElementById('week'), document.getElementById('weekbar')];
-  zone.forEach(el=>{
-    el.addEventListener('touchstart',e=>{ x0=e.touches[0].clientX; y0=e.touches[0].clientY; },{passive:true});
-    el.addEventListener('touchend',e=>{
-      if(x0===null) return;
-      const t=e.changedTouches[0], dx=t.clientX-x0, dy=t.clientY-y0;
-      x0=null;
-      if(Math.abs(dx)>40 && Math.abs(dx)>Math.abs(dy)*1.5){
-        state.weekOff += (dx<0 ? 1 : -1);
-        render();
-      }
-    },{passive:true});
+function scrollToWeek(off, smooth){
+  const sc=document.getElementById('weekScroll'); const w=sc.clientWidth; if(!w) return;
+  sc._lock=true;
+  sc.scrollTo({left:(off-WMIN)*w, behavior:smooth?'smooth':'auto'});
+  setTimeout(()=>{ sc._lock=false; }, smooth?450:80);
+}
+function markSelDay(){
+  const sel=state.selDay;
+  document.querySelectorAll('#weekScroll .day').forEach(el=>{
+    const d=new Date(el.dataset.day), on=sel&&d.toDateString()===sel.toDateString();
+    el.classList.toggle('sel',on);
+    const dot=el.querySelector('.dot');
+    if(dot) dot.style.background = dayHasTasks(d) ? (on?'#fff':'#378ADD') : 'transparent';
   });
+}
+function renderCalList(){
+  const list=document.getElementById('list');
+  const sel=state.selDay||new Date();
+  let items=visible().filter(t=>t.checklist!=='1')
+    .filter(t=>{const d=parseDue(t.due_at);return d&&d.toDateString()===sel.toDateString();});
+  if(!items.length){ list.innerHTML='<div class="empty"><div class="big">🗒️</div>Задач нет</div>'; return; }
+  items.sort(byPrio); list.innerHTML=items.map(cardHTML).join(''); bind();
+}
+function gotoWeek(off, smooth){
+  state.weekOff=off;
+  const mon=mondayFor(off), today=new Date();
+  const endW=new Date(mon); endW.setDate(mon.getDate()+7);
+  state.selDay = (today>=mon && today<endW) ? today : mon;
+  weekLabel(); markSelDay(); renderCalList();
+  if(smooth!==null) scrollToWeek(off, smooth);
+}
+document.getElementById('wPrev').onclick=()=>gotoWeek(state.weekOff-1,true);
+document.getElementById('wNext').onclick=()=>gotoWeek(state.weekOff+1,true);
+(function(){
+  const sc=document.getElementById('weekScroll');
+  sc.addEventListener('scroll',()=>{
+    if(sc._lock) return;
+    clearTimeout(sc._t);
+    sc._t=setTimeout(()=>{
+      const w=sc.clientWidth; if(!w) return;
+      const off=Math.round(sc.scrollLeft/w)+WMIN;
+      if(off!==state.weekOff) gotoWeek(off,null);
+    },110);
+  },{passive:true});
 })();
 
 function tgHTML(on){ return `<span class="tg" style="background:${on?'#1D9E75':'#D3D1C7'}"><i style="left:${on?'19px':'2.5px'}"></i></span>`; }
@@ -453,7 +500,7 @@ async function loadAccess(){
     g.querySelectorAll('.accDel').forEach(d=>d.onclick=async()=>{ try{ await api('/api/access/'+d.dataset.id,{method:'DELETE'}); loadAccess(); }catch(e){} });
   }catch(e){}
 }
-function openAccess(){ document.getElementById('accId').value=''; document.getElementById('accName').value=''; document.getElementById('accScrim').classList.add('on'); }
+function openAccess(){ document.getElementById('accId').value=''; document.getElementById('accName').value=''; showScrim('accScrim'); }
 document.getElementById('accCancel').onclick=()=>document.getElementById('accScrim').classList.remove('on');
 document.getElementById('accSave').onclick=async()=>{
   const id=document.getElementById('accId').value.trim(), name=document.getElementById('accName').value.trim();
@@ -469,7 +516,7 @@ function openOpts(title, options, onPick){
     document.getElementById('optScrim').classList.remove('on');
     if(onPick) onPick(o.value); else saveSettings(o.patch);
   });
-  document.getElementById('optScrim').classList.add('on');
+  showScrim('optScrim');
 }
 
 const LEADLBL={0:"в момент срока",10:"за 10 мин",30:"за 30 мин",60:"за 1 час",180:"за 3 часа",1440:"за 1 день",2880:"за 2 дня"};
@@ -529,7 +576,7 @@ async function openTask(id){
   document.getElementById('cmtList').innerHTML=''; document.getElementById('cmtInput').value='';
   updateChkUI();
   if(id) loadComments(id);
-  document.getElementById('taskScrim').classList.add('on');
+  showScrim('taskScrim');
 }
 function closeTask(){ document.getElementById('taskScrim').classList.remove('on'); }
 async function loadComments(id){
@@ -590,7 +637,7 @@ function markWheel(el){ const i=wheelIndex(el); el.querySelectorAll('.wi').forEa
 function buildWheel(el, items, sel){ el.innerHTML='<div class="pad"></div>'+items.map(t=>'<div class="wi">'+t+'</div>').join('')+'<div class="pad"></div>';
   el.scrollTop=sel*40; markWheel(el); el.onscroll=()=>{ clearTimeout(el._t); el._t=setTimeout(()=>markWheel(el),70); }; }
 function openDue(){
-  document.getElementById('dueScrim').classList.add('on');
+  showScrim('dueScrim');
   setTimeout(()=>{ const base=curDue?new Date(curDue):new Date();
     const dval=base.getFullYear()+'-'+p2(base.getMonth()+1)+'-'+p2(base.getDate());
     let di=DUE_DATES.findIndex(x=>x.val===dval); if(di<0) di=30;
@@ -622,7 +669,7 @@ function openCat(name){
   cc.innerHTML=PALETTE.map(col=>`<span data-col="${col}" style="width:30px;height:30px;border-radius:50%;background:${col};border:${col===curColor?'3px solid #23221E':'3px solid transparent'}"></span>`).join('');
   cc.querySelectorAll('[data-col]').forEach(s=>s.onclick=()=>{curColor=s.dataset.col;cc.querySelectorAll('[data-col]').forEach(x=>x.style.border='3px solid transparent');s.style.border='3px solid #23221E';});
   document.getElementById('cDelete').style.display=name?'block':'none';
-  document.getElementById('catScrim').classList.add('on');
+  showScrim('catScrim');
 }
 function closeCat(){ document.getElementById('catScrim').classList.remove('on'); }
 document.getElementById('cCancel').onclick=closeCat;
