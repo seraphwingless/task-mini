@@ -466,6 +466,9 @@ document.getElementById('wNext').onclick=()=>gotoWeek(state.weekOff+1,true);
 function tgHTML(on){ return `<span class="tg" style="background:${on?'#1D9E75':'#D3D1C7'}"><i style="left:${on?'19px':'2.5px'}"></i></span>`; }
 const THEME={"auto":"как в Telegram","light":"светлая","dark":"тёмная"};
 function urgLabel(){ const g=+S('urg_green_h',48); return g>=72?'мягкие':(g<=24?'жёсткие':'стандарт'); }
+// Список времени с шагом 30 минут, от часа from до часа to включительно.
+function times(from,to){ const a=[],p=n=>String(n).padStart(2,'0');
+  for(let h=from;h<=to;h++){ a.push(p(h)+':00'); if(h<to) a.push(p(h)+':30'); } return a; }
 function opt(label,patch){ return {label,patch}; }
 
 function renderSettings(){
@@ -483,8 +486,8 @@ function renderSettings(){
     <div class="slabel">Напоминания (общее)</div>
     <div class="sgroup">
       <div class="srow"><span>Тихие часы (${S('quiet_start','23:00')}–${S('quiet_end','08:00')})</span><span class="tg2" data-k="quiet_on">${tgHTML(S('quiet_on','1')==='1')}</span></div>
-      <div class="srow"><span>Утренний дайджест (${S('digest_time','08:00')})</span><span class="tg2" data-k="digest_on">${tgHTML(S('digest_on','1')==='1')}</span></div>
-      <div class="srow"><span>Превью на завтра (${S('evening_time','20:00')})</span><span class="tg2" data-k="evening_on">${tgHTML(S('evening_on','1')==='1')}</span></div>
+      <div class="srow"><span id="sDigTime">Утренний дайджест (${S('digest_time','09:00')}) ›</span><span class="tg2" data-k="digest_on">${tgHTML(S('digest_on','1')==='1')}</span></div>
+      <div class="srow"><span id="sEveTime">Превью на завтра (${S('evening_time','20:00')}) ›</span><span class="tg2" data-k="evening_on">${tgHTML(S('evening_on','1')==='1')}</span></div>
     </div>
     <div class="slabel">Время</div>
     <div class="sgroup"><div class="srow"><span>Часовой пояс</span><span class="val">авто · ${tz}</span></div></div>
@@ -500,6 +503,10 @@ function renderSettings(){
     opt('стандарт (🟢>2д, 🔴<12ч)',{urg_green_h:48,urg_yellow_h:24,urg_orange_h:12}),
     opt('жёсткие (🟢>1д, 🔴<4ч)',{urg_green_h:24,urg_yellow_h:12,urg_orange_h:4})]);
   document.getElementById('sTheme').onclick=()=>openOpts('Тема',Object.keys(THEME).map(v=>opt(THEME[v],{theme:v})));
+  document.getElementById('sDigTime').onclick=()=>openOpts('Время утреннего дайджеста',
+    times(6,12).map(t=>opt(t,{digest_time:t})));
+  document.getElementById('sEveTime').onclick=()=>openOpts('Время вечернего превью',
+    times(17,23).map(t=>opt(t,{evening_time:t})));
   document.querySelectorAll('.tg2').forEach(t=>t.onclick=()=>{const k=t.dataset.k; saveSettings({[k]: S(k,'1')==='1'?'0':'1'});});
   if(state.me&&state.me.is_owner) loadAccess();
 }

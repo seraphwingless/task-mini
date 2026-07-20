@@ -25,7 +25,7 @@ DEFAULT_CATS = [
 DEFAULT_SETTINGS = {
     "default_priority": "P3", "urg_green_h": "48", "urg_yellow_h": "24", "urg_orange_h": "12",
     "quiet_on": "1", "quiet_start": "23:00", "quiet_end": "08:00",
-    "digest_on": "1", "digest_time": "08:00",
+    "digest_on": "1", "digest_time": "09:00",
     "evening_on": "1", "evening_time": "20:00", "theme": "auto",
 }
 
@@ -64,6 +64,18 @@ DO $$ BEGIN
   END;
   UPDATE tasks SET category = initcap(category)
    WHERE category IS NOT NULL AND category <> '' AND category <> initcap(category);
+END $$;
+-- Разовый перенос утреннего дайджеста с 08:00 на 09:00 (флаг, чтобы не повторялось).
+DO $$ BEGIN
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM user_settings WHERE key='_mig_digest_9') THEN
+      UPDATE user_settings SET value='09:00' WHERE key='digest_time' AND value='08:00';
+      INSERT INTO user_settings(user_id,key,value)
+        SELECT DISTINCT user_id,'_mig_digest_9','1' FROM user_settings
+        ON CONFLICT DO NOTHING;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
 END $$;
 """
 
@@ -210,7 +222,8 @@ class DB:
                 await p.execute("INSERT INTO user_settings(user_id,key,value) VALUES($1,$2,$3) "
                                 "ON CONFLICT DO NOTHING", int(uid), k, v)
             return dict(DEFAULT_SETTINGS)
-        return {**DEFAULT_SETTINGS, **{r["key"]: r["value"] for r in rows}}
+        stored = {r["key"]: r["value"] for r in rows if not r["key"].startswith("_")}
+        return {**DEFAULT_SETTINGS, **stored}
 
     async def set_settings(self, uid: int, patch: dict):
         p = await self.pool()
