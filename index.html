@@ -237,6 +237,10 @@ function showScrim(id){
   s.classList.add('on');
   if(p) requestAnimationFrame(()=>{ p.scrollTop=0; });
 }
+// Тап по затемнению вне панели закрывает её.
+document.querySelectorAll('.scrim').forEach(s=>{
+  s.addEventListener('click', e=>{ if(e.target===s) s.classList.remove('on'); });
+});
 
 async function api(path, opts={}) {
   const r = await fetch(path, Object.assign({}, opts, { headers: Object.assign({
@@ -252,6 +256,13 @@ function absDue(iso){ const d=new Date((iso||'').replace(' ','T')); if(isNaN(d))
 function defaultDueLocal(){ const d=new Date(); d.setHours(d.getHours()+1,0,0,0);
   const p=n=>String(n).padStart(2,'0');
   return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes()); }
+// Новая задача наследует дату, выбранную в ленте недель.
+function dueForNew(){
+  const p=n=>String(n).padStart(2,'0'), today=new Date();
+  const sel=(state.tab==='calendar' && state.selDay) ? new Date(state.selDay) : null;
+  if(!sel || sel.toDateString()===today.toDateString()) return defaultDueLocal();
+  return sel.getFullYear()+'-'+p(sel.getMonth()+1)+'-'+p(sel.getDate())+'T09:00';
+}
 function urgency(due){
   if(!due) return {text:'',emoji:''};
   const ms=due-new Date();
@@ -568,7 +579,7 @@ async function openTask(id){
   curChecklist=t?(t.checklist||'0'):(state.tab==='checklist'?'1':'0');
   chipRow(document.getElementById('fCat'), state.cats.map(c=>c.name), n=>`${catMeta(n).emoji} ${n}`, curCat, v=>curCat=v);
   chipRow(document.getElementById('fPrio'), ['P1','P2','P3','P4','P5'], x=>x, curPrio, v=>curPrio=v);
-  curDue=t?(t.due_at?t.due_at.slice(0,16):''):defaultDueLocal(); updateDueBtn();
+  curDue=t?(t.due_at?t.due_at.slice(0,16):''):dueForNew(); updateDueBtn();
   try{ curReminders = t ? (t.reminders?JSON.parse(t.reminders):[]) : [0]; }catch(e){ curReminders=[0]; }
   curNag = t?(t.nag_on||'0'):'0'; renderRemChips(); updateNagBtn();
   document.getElementById('fDelete').style.display=id?'block':'none';
