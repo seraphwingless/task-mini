@@ -25,7 +25,8 @@ DEFAULT_CATS = [
 DEFAULT_SETTINGS = {
     "default_priority": "P3", "urg_green_h": "48", "urg_yellow_h": "24", "urg_orange_h": "12",
     "quiet_on": "1", "quiet_start": "23:00", "quiet_end": "08:00",
-    "digest_on": "1", "digest_time": "08:00", "theme": "auto",
+    "digest_on": "1", "digest_time": "08:00",
+    "evening_on": "1", "evening_time": "20:00", "theme": "auto",
 }
 
 
