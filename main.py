@@ -3,7 +3,10 @@
 каждый видит только свои данные. Управление доступом — только у владельца."""
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import urllib.request
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -209,6 +212,22 @@ async def list_access(uid: int = Depends(owner_only)):
     return await store.list_access()
 
 
+async def tg_notify(chat_id: int, text: str) -> bool:
+    """Пишем пользователю от имени бота. False — значит бот не может ему написать
+    (обычно человек ещё не нажал Start)."""
+    def _post() -> bool:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data=json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return bool(json.loads(r.read().decode()).get("ok"))
+    try:
+        return await asyncio.to_thread(_post)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @app.post("/api/access")
 async def add_access(body: AccessIn, uid: int = Depends(owner_only)):
     try:
@@ -216,7 +235,10 @@ async def add_access(body: AccessIn, uid: int = Depends(owner_only)):
     except ValueError:
         raise HTTPException(status_code=400, detail="bad id")
     await store.add_access(target, body.name)
-    return {"ok": True}
+    notified = await tg_notify(target, "✅ Тебе открыли доступ к задачам.\n\n"
+                                       "Открой приложение через меню бота — задачи, чеклист "
+                                       "и напоминания у тебя свои, отдельные.")
+    return {"ok": True, "notified": notified}
 
 
 @app.delete("/api/access/{target}")

@@ -66,10 +66,12 @@
   nav div.on{ color:var(--accent); background:rgba(24,95,165,.10); }
   nav .ic{ font-size:20px; display:block; margin-bottom:3px; line-height:1; }
   html[data-theme="dark"] nav div.on{ background:rgba(90,160,235,.16); color:#7FB4EC; }
-  .scrim{ position:fixed; inset:0; background:rgba(15,15,15,.4); display:none; align-items:flex-end; z-index:20; }
+  /* Высота берётся от видимой области: когда открыта клавиатура, панель ужимается над ней. */
+  .scrim{ position:fixed; left:0; right:0; top:var(--vtop,0px); height:var(--vh,100%);
+          background:rgba(15,15,15,.4); display:none; align-items:flex-end; z-index:20; }
   .scrim.on{ display:flex; }
   .panel{ background:#fff; width:100%; border-radius:20px 20px 0 0; padding:18px 18px max(18px, env(safe-area-inset-bottom));
-          max-height:92vh; overflow-y:auto; animation:up .22s ease; }
+          max-height:100%; overflow-y:auto; animation:up .22s ease; }
   @keyframes up{ from{ transform:translateY(30px); opacity:.6 } to{ transform:none; opacity:1 } }
   .panel h2{ font-size:18px; margin:0 0 16px; }
   .fld{ margin-bottom:14px; }
@@ -181,6 +183,7 @@
     <div class="fld"><label>Telegram ID</label><input type="text" id="accId" inputmode="numeric" placeholder="123456789"></div>
     <div class="fld"><label>Имя (для тебя)</label><input type="text" id="accName" placeholder="Ксения"></div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">ID человек узнаёт у @userinfobot и присылает тебе.</div>
+    <div id="accHint" style="font-size:13px;line-height:1.4;margin-bottom:10px;display:none"></div>
     <button class="btn" id="accSave">Добавить</button>
     <button class="btn ghost" id="accCancel">Отмена</button>
   </div></div>
@@ -240,6 +243,24 @@ function showScrim(id){
 // Тап по затемнению вне панели закрывает её.
 document.querySelectorAll('.scrim').forEach(s=>{
   s.addEventListener('click', e=>{ if(e.target===s) s.classList.remove('on'); });
+});
+// Панель живёт в видимой области: клавиатура её ужимает, а не перекрывает.
+function fitViewport(){
+  const vv=window.visualViewport;
+  const st=document.documentElement.style;
+  st.setProperty('--vh', ((vv?vv.height:window.innerHeight))+'px');
+  st.setProperty('--vtop', ((vv?vv.offsetTop:0))+'px');
+}
+if(window.visualViewport){
+  visualViewport.addEventListener('resize', fitViewport);
+  visualViewport.addEventListener('scroll', fitViewport);
+}
+window.addEventListener('resize', fitViewport);
+fitViewport();
+// Поле, в которое печатаешь, само подскроллится в видимую часть.
+document.addEventListener('focusin', e=>{
+  if(e.target.matches && e.target.matches('input,textarea'))
+    setTimeout(()=>{ try{ e.target.scrollIntoView({block:'center',behavior:'smooth'}); }catch(_){} }, 280);
 });
 
 async function api(path, opts={}) {
@@ -519,12 +540,27 @@ async function loadAccess(){
     g.querySelectorAll('.accDel').forEach(d=>d.onclick=async()=>{ try{ await api('/api/access/'+d.dataset.id,{method:'DELETE'}); loadAccess(); }catch(e){} });
   }catch(e){}
 }
-function openAccess(){ document.getElementById('accId').value=''; document.getElementById('accName').value=''; showScrim('accScrim'); }
+function openAccess(){
+  document.getElementById('accId').value=''; document.getElementById('accName').value='';
+  document.getElementById('accHint').style.display='none';
+  showScrim('accScrim');
+}
 document.getElementById('accCancel').onclick=()=>document.getElementById('accScrim').classList.remove('on');
 document.getElementById('accSave').onclick=async()=>{
   const id=document.getElementById('accId').value.trim(), name=document.getElementById('accName').value.trim();
   if(!id) return;
-  try{ await api('/api/access',{method:'POST',body:JSON.stringify({user_id:id,name})}); document.getElementById('accScrim').classList.remove('on'); loadAccess(); }catch(e){}
+  const hint=document.getElementById('accHint');
+  try{
+    const r=await api('/api/access',{method:'POST',body:JSON.stringify({user_id:id,name})});
+    loadAccess();
+    if(r && r.notified===false){
+      hint.style.display='block'; hint.style.color='#C4762A';
+      hint.innerHTML='Доступ выдан, но бот не смог написать этому человеку. '
+        +'Попроси его открыть бота и нажать «Начать» — без этого Telegram не даёт боту слать напоминания.';
+    } else {
+      document.getElementById('accScrim').classList.remove('on');
+    }
+  }catch(e){}
 };
 function openOpts(title, options, onPick){
   document.getElementById('optTitle').textContent=title;
