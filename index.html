@@ -511,7 +511,7 @@ function renderSettings(){
       <div class="srow"><span id="sEveTime">Превью на завтра (${S('evening_time','20:00')}) ›</span><span class="tg2" data-k="evening_on">${tgHTML(S('evening_on','1')==='1')}</span></div>
     </div>
     <div class="slabel">Время</div>
-    <div class="sgroup"><div class="srow"><span>Часовой пояс</span><span class="val">авто · ${tz}</span></div></div>
+    <div class="sgroup"><div class="srow"><span>Часовой пояс</span><span class="val">авто · ${S('tz','')||tz}</span></div></div>
     <div class="slabel">Оформление</div>
     <div class="sgroup"><div class="srow" id="sTheme"><span>Тема</span><span class="val">${THEME[S('theme','auto')]||'как в Telegram'} ›</span></div></div>
     ${state.me&&state.me.is_owner?'<div class="slabel">Доступ (только у тебя)</div><div class="sgroup" id="accGroup"></div>':''}
@@ -755,6 +755,11 @@ async function load(){ try{ state.tasks=await api('/api/tasks'); saveCache(); re
     const b = await api('/api/bootstrap');
     state.me=b.me; state.settings=b.settings; state.cats=b.cats; state.tasks=b.tasks;
     applyTheme(); saveCache(); render();
+    // Сообщаем серверу свой часовой пояс — от него зависит время напоминаний.
+    const myTz = (Intl.DateTimeFormat().resolvedOptions().timeZone)||'';
+    if(myTz && state.settings.tz!==myTz){
+      try{ state.settings=await api('/api/settings',{method:'PUT',body:JSON.stringify({tz:myTz})}); saveCache(); }catch(_){}
+    }
   }catch(e){
     if(!cached && !state.denied)
       document.getElementById('list').innerHTML='<div class="empty"><div class="big">📡</div>Нет связи. Потяни вниз, чтобы обновить.</div>';

@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "quiet_on": "1", "quiet_start": "23:00", "quiet_end": "08:00",
     "digest_on": "1", "digest_time": "09:00",
     "evening_on": "1", "evening_time": "20:00", "theme": "auto",
+    "tz": "",  # пустой — берём пояс сервера; заполняется приложением автоматически
 }
 
 
