@@ -96,6 +96,7 @@
         font-size:16px; font-weight:600; margin-top:6px; }
   .btn.ghost{ background:#F1EFE8; color:#5F5E5A; }
   .btn.danger{ background:#FCEBEB; color:#A32D2D; }
+  .btn.danger.confirm{ background:#D93A34; color:#fff; }
   .cmt{ border-left:2px solid var(--line); padding-left:11px; margin-bottom:12px; }
   .cmt .t{ font-size:11px; color:#B4B2A9; margin-bottom:3px; }
   .cmt .b{ font-size:14px; line-height:1.5; }
@@ -627,13 +628,14 @@ async function openTask(id){
   try{ curReminders = t ? (t.reminders?JSON.parse(t.reminders):[]) : [0]; }catch(e){ curReminders=[0]; }
   curNag = t?(t.nag_on||'0'):'0'; renderRemChips(); updateNagBtn();
   document.getElementById('fDelete').style.display=id?'block':'none';
+  resetDelBtn();
   document.getElementById('cmtWrap').style.display=id?'block':'none';
   document.getElementById('cmtList').innerHTML=''; document.getElementById('cmtInput').value='';
   updateChkUI();
   if(id) loadComments(id);
   showScrim('taskScrim');
 }
-function closeTask(){ document.getElementById('taskScrim').classList.remove('on'); }
+function closeTask(){ resetDelBtn(); document.getElementById('taskScrim').classList.remove('on'); }
 async function loadComments(id){
   try{ const cs=await api('/api/tasks/'+id+'/comments');
     document.getElementById('cmtList').innerHTML=cs.map(c=>`<div class="cmt"><div class="t">${new Date(c.created_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div><div class="b">${linkify(c.text)}</div></div>`).join('')||'<div style="color:#B4B2A9;font-size:13px;margin-bottom:8px">Пока нет комментариев.</div>';
@@ -667,10 +669,27 @@ document.getElementById('fFinish').onclick=e=>once(e.currentTarget,'Убираю
   if(!state.editId) return;
   await api('/api/tasks/'+state.editId+'/done',{method:'POST'}); closeTask(); await load();
 });
-document.getElementById('fDelete').onclick=e=>once(e.currentTarget,'Удаляю…',async()=>{
-  if(!state.editId) return;
-  await api('/api/tasks/'+state.editId,{method:'DELETE'}); closeTask(); await load();
-});
+// Удаление в два шага: первый тап — предупреждение, второй — удаление.
+let delArmed=false, delTimer=null;
+function resetDelBtn(){
+  delArmed=false; clearTimeout(delTimer);
+  const b=document.getElementById('fDelete');
+  b.textContent='Удалить задачу'; b.classList.remove('confirm');
+}
+document.getElementById('fDelete').onclick=e=>{
+  if(!state.editId || busy) return;
+  const b=e.currentTarget;
+  if(!delArmed){
+    delArmed=true; b.textContent='Точно удалить? Нажми ещё раз'; b.classList.add('confirm');
+    if(tg&&tg.HapticFeedback) try{ tg.HapticFeedback.notificationOccurred('warning'); }catch(_){}
+    delTimer=setTimeout(resetDelBtn, 4000);
+    return;
+  }
+  resetDelBtn();
+  once(b,'Удаляю…',async()=>{
+    await api('/api/tasks/'+state.editId,{method:'DELETE'}); closeTask(); await load();
+  });
+};
 
 // ---------- iOS-style date/time wheels ----------
 const MON=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
